@@ -129,6 +129,10 @@
     return algo.authorId === currentUserId;
   }
 
+  function isCurrentAlgorithm(algoId: string): boolean {
+    return state.currentAlgorithm && state.currentAlgorithm.id === algoId;
+  }
+
   function handleNameInput(e: Event) {
     const target = e.target as HTMLInputElement;
     customAlgorithmStore.setEditorName(target.value);
@@ -175,8 +179,8 @@
           {#each state.algorithms as algo (algo.id)}
             <div
               class="p-2 bg-[#0d0d1a] rounded text-xs flex items-center justify-between group"
-              class:border-[#9b59b6]={state.currentAlgorithm?.id === algo.id}
-              class:border-2={state.currentAlgorithm?.id === algo.id}
+              class:border-[#9b59b6]={isCurrentAlgorithm(algo.id)}
+              class:border-2={isCurrentAlgorithm(algo.id)}
             >
               <div class="flex-1 min-w-0">
                 <div class="font-semibold truncate" title={algo.name}>{algo.name}</div>
