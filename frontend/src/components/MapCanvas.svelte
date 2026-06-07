@@ -12,7 +12,7 @@
   } from '../drawingTools';
   import { cellKey, getTile, setTile, clamp, hasLineOfSight } from '../utils';
   import { TerrainType, LayerType } from '../types';
-  import type { Cell, Operation, CellOp, SearchState, TileData } from '../types';
+  import type { Cell, Operation, CellOp, SearchState, TileData, ComparePathInfo } from '../types';
   import { TerrainColors } from '../types';
 
   let canvas: HTMLCanvasElement;
@@ -48,8 +48,15 @@
   $: heatmapState = $heatmapStore;
   $: replayingBookmark = $bookmarksStore.replayingBookmark;
   $: isPlaybackMode = $playbackStore.isActive;
+  $: compareMode = $bookmarksStore.compareMode;
+  $: comparingPaths = compareMode.comparingPaths;
+  $: isCompareMode = compareMode.isActive;
 
   let cellSize = 16;
+  let tooltipPaths: ComparePathInfo[] = [];
+  let tooltipX = 0;
+  let tooltipY = 0;
+  let showTooltip = false;
   let isRightMouseDown = false;
   let lastMouseX = 0;
   let lastMouseY = 0;
@@ -250,6 +257,70 @@
       ctx.strokeStyle = '#e74c3c';
       ctx.lineWidth = 3;
       ctx.stroke();
+    }
+
+    if (comparingPaths.length > 0) {
+      for (const pathInfo of comparingPaths) {
+        const path = pathInfo.bookmark.path;
+        if (path.length === 0) continue;
+
+        ctx.strokeStyle = pathInfo.color;
+        ctx.lineWidth = Math.max(4, scaledCellSize * 0.5);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+
+        for (let i = 0; i < path.length; i++) {
+          const p = path[i];
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          if (i === 0) {
+            ctx.moveTo(screen.x, screen.y);
+          } else {
+            ctx.lineTo(screen.x, screen.y);
+          }
+        }
+        ctx.stroke();
+
+        if (path.length > 1) {
+          ctx.strokeStyle = pathInfo.color + '40';
+          ctx.lineWidth = Math.max(6, scaledCellSize * 0.7);
+          ctx.stroke();
+        }
+
+        for (const p of path) {
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          const radius = scaledCellSize * 0.2;
+          ctx.fillStyle = pathInfo.color;
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const startP = pathInfo.bookmark.startPoint;
+        const endP = pathInfo.bookmark.endPoint;
+
+        const startScreen = worldToScreen(startP.x + 0.5, startP.y + 0.5);
+        const startRadius = scaledCellSize * 0.5;
+        ctx.fillStyle = pathInfo.color;
+        ctx.beginPath();
+        ctx.arc(startScreen.x, startScreen.y, startRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const endScreen = worldToScreen(endP.x + 0.5, endP.y + 0.5);
+        const endRadius = scaledCellSize * 0.5;
+        ctx.fillStyle = pathInfo.color;
+        ctx.beginPath();
+        ctx.arc(endScreen.x, endScreen.y, endRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
     }
 
     if (searchState) {
@@ -453,6 +524,25 @@
       }
     }
 
+    if (comparingPaths.length > 0 && cell.x >= 0 && cell.y >= 0 && cell.x < mapData.width && cell.y < mapData.height) {
+      const paths = bookmarksStore.getPathsAtCell(cell.x, cell.y);
+      if (paths.length >= 2) {
+        showTooltip = true;
+        tooltipPaths = paths;
+        tooltipX = e.clientX;
+        tooltipY = e.clientY;
+        bookmarksStore.setCompareHoverCell(cell);
+      } else {
+        showTooltip = false;
+        tooltipPaths = [];
+        bookmarksStore.setCompareHoverCell(null);
+      }
+    } else {
+      showTooltip = false;
+      tooltipPaths = [];
+      bookmarksStore.setCompareHoverCell(null);
+    }
+
     if (isDrawing && drawStart) {
       uiStore.setDrawCurrent(cell);
       updatePreview(cell);
@@ -518,6 +608,10 @@
       return;
     }
 
+    if (isCompareMode && comparingPaths.length === 0) {
+      return;
+    }
+
     if (replayingBookmark) {
       bookmarksStore.replayBookmark(null);
       bookmarksStore.selectBookmark(null);
@@ -525,6 +619,10 @@
       pathfindingStore.setEndPoint(null);
       pathfindingStore.clearPath();
       render();
+      return;
+    }
+
+    if (isCompareMode) {
       return;
     }
 
@@ -828,11 +926,29 @@
     on:mousedown={handleMouseDown}
     on:mousemove={handleMouseMove}
     on:mouseup={handleMouseUp}
-    on:mouseleave={handleMouseUp}
+    on:mouseleave={() => { showTooltip = false; handleMouseUp(new MouseEvent('mouseup')); }}
     on:wheel={handleWheel}
     on:contextmenu={handleContextMenu}
     class={isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}
   />
+
+  {#if showTooltip && tooltipPaths.length > 0}
+    <div
+      class="fixed z-50 bg-[#16162a] border border-[#3d3d54] rounded-lg shadow-xl p-3 pointer-events-none"
+      style="left: {tooltipX + 15}px; top: {tooltipY + 15}px; max-width: 250px;"
+    >
+      <div class="text-xs font-semibold text-[#f39c12] mb-2">该格子被 {tooltipPaths.length} 条路径经过:</div>
+      <div class="space-y-1">
+        {#each tooltipPaths as pathInfo (pathInfo.bookmark.id)}
+          <div class="flex items-center gap-2 text-xs">
+            <span class="w-3 h-3 rounded-full flex-shrink-0" style="background: {pathInfo.color}"></span>
+            <span class="truncate text-[#e0e0e0]">{pathInfo.bookmark.name}</span>
+            <span class="text-[#3498db] ml-auto">{pathInfo.bookmark.algorithm.toUpperCase()}</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <div class="canvas-hud absolute bottom-4 left-4 flex gap-2 text-xs text-muted">
     <span class="badge badge-info">缩放: {Math.round(zoom * 100)}%</span>

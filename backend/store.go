@@ -230,7 +230,20 @@ func (s *Store) DeleteRoom(roomID string) error {
 	pipe.Del(ctx, fmt.Sprintf("room:%s:recorded_ops", roomID))
 	pipe.Del(ctx, fmt.Sprintf("room:%s:snapshots", roomID))
 	pipe.Del(ctx, fmt.Sprintf("room:%s:playback_bookmarks", roomID))
-	_, err := pipe.Exec(ctx)
+
+	bookmarks, err := s.LoadBookmarks(roomID)
+	if err == nil {
+		for _, b := range bookmarks {
+			pipe.Del(ctx, fmt.Sprintf("room:%s:bookmark:%s:comments", roomID, b.ID))
+		}
+	}
+
+	iter := s.rdb.Scan(ctx, 0, fmt.Sprintf("room:%s:bookmark:*:comments", roomID), 0).Iterator()
+	for iter.Next(ctx) {
+		pipe.Del(ctx, iter.Val())
+	}
+
+	_, err = pipe.Exec(ctx)
 	return err
 }
 
@@ -269,4 +282,90 @@ func (s *Store) LoadBookmarks(roomID string) ([]PathBookmark, error) {
 	}
 
 	return bookmarks, nil
+}
+
+func (s *Store) SaveBookmarkComment(roomID string, comment BookmarkComment) error {
+	comments, err := s.LoadBookmarkComments(roomID, comment.BookmarkID)
+	if err != nil {
+		return err
+	}
+
+	comments = append(comments, comment)
+	if len(comments) > 20 {
+		comments = comments[len(comments)-20:]
+	}
+
+	data, err := json.Marshal(comments)
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("room:%s:bookmark:%s:comments", roomID, comment.BookmarkID)
+	return s.rdb.Set(ctx, key, data, 24*time.Hour).Err()
+}
+
+func (s *Store) LoadBookmarkComments(roomID, bookmarkID string) ([]BookmarkComment, error) {
+	key := fmt.Sprintf("room:%s:bookmark:%s:comments", roomID, bookmarkID)
+	data, err := s.rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return []BookmarkComment{}, nil
+		}
+		return nil, err
+	}
+
+	var comments []BookmarkComment
+	if err := json.Unmarshal([]byte(data), &comments); err != nil {
+		return nil, err
+	}
+
+	return comments, nil
+}
+
+func (s *Store) DeleteBookmarkComment(roomID, bookmarkID, commentID, userID string) (bool, error) {
+	comments, err := s.LoadBookmarkComments(roomID, bookmarkID)
+	if err != nil {
+		return false, err
+	}
+
+	found := false
+	deleted := false
+	for i, c := range comments {
+		if c.ID == commentID {
+			found = true
+			if c.UserID == userID {
+				comments = append(comments[:i], comments[i+1:]...)
+				deleted = true
+			}
+			break
+		}
+	}
+
+	if !found {
+		return false, fmt.Errorf("comment not found")
+	}
+
+	if !deleted {
+		return false, fmt.Errorf("permission denied")
+	}
+
+	data, err := json.Marshal(comments)
+	if err != nil {
+		return false, err
+	}
+
+	key := fmt.Sprintf("room:%s:bookmark:%s:comments", roomID, bookmarkID)
+	return true, s.rdb.Set(ctx, key, data, 24*time.Hour).Err()
+}
+
+func (s *Store) LoadAllBookmarkComments(roomID string, bookmarkIDs []string) (map[string][]BookmarkComment, error) {
+	result := make(map[string][]BookmarkComment)
+	for _, bookmarkID := range bookmarkIDs {
+		comments, err := s.LoadBookmarkComments(roomID, bookmarkID)
+		if err != nil {
+			continue
+		}
+		result[bookmarkID] = comments
+	}
+	return result, nil
 }

@@ -155,17 +155,24 @@ func (rm *RoomManager) JoinRoom(roomID, userName string, conn *websocket.Conn) (
 	room.clients[userID] = conn
 	room.store.SaveRoom(room.state)
 
+	bookmarkIDs := make([]string, len(room.state.Bookmarks))
+	for i, b := range room.state.Bookmarks {
+		bookmarkIDs[i] = b.ID
+	}
+	bookmarkComments, _ := room.store.LoadAllBookmarkComments(roomID, bookmarkIDs)
+
 	joinMsg := Message{
 		Type: "user-join",
 		Payload: map[string]interface{}{
-			"user":        user,
-			"users":       room.state.Users,
-			"roomId":      roomID,
-			"mapData":     room.state.MapData,
-			"yourId":      userID,
-			"bookmarks":   room.state.Bookmarks,
-			"recording":   room.state.Recording,
-			"playbacks":   room.state.Playbacks,
+			"user":              user,
+			"users":             room.state.Users,
+			"roomId":            roomID,
+			"mapData":           room.state.MapData,
+			"yourId":            userID,
+			"bookmarks":         room.state.Bookmarks,
+			"bookmarkComments":  bookmarkComments,
+			"recording":         room.state.Recording,
+			"playbacks":         room.state.Playbacks,
 		},
 	}
 
@@ -607,6 +614,75 @@ func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMess
 			data, _ := json.Marshal(respMsg)
 			conn.WriteMessage(websocket.TextMessage, data)
 		}
+
+	case "bookmark-comment-add":
+		var req struct {
+			BookmarkID string `json:"bookmarkId"`
+			Content    string `json:"content"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		if len(req.Content) == 0 || len(req.Content) > 200 {
+			return
+		}
+
+		bookmarkExists := false
+		for _, b := range r.state.Bookmarks {
+			if b.ID == req.BookmarkID {
+				bookmarkExists = true
+				break
+			}
+		}
+		if !bookmarkExists {
+			return
+		}
+
+		userName := ""
+		if user, exists := r.state.Users[userID]; exists {
+			userName = user.Name
+		}
+
+		comment := BookmarkComment{
+			ID:         uuid.New().String(),
+			BookmarkID: req.BookmarkID,
+			UserID:     userID,
+			UserName:   userName,
+			Content:    req.Content,
+			CreatedAt:  time.Now().UnixNano() / int64(time.Millisecond),
+		}
+
+		if err := r.store.SaveBookmarkComment(r.ID, comment); err != nil {
+			return
+		}
+
+		r.broadcast(Message{
+			Type:    "bookmark-comment-added",
+			Payload: comment,
+		}, "")
+
+	case "bookmark-comment-delete":
+		var req struct {
+			BookmarkID string `json:"bookmarkId"`
+			CommentID  string `json:"commentId"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		deleted, err := r.store.DeleteBookmarkComment(r.ID, req.BookmarkID, req.CommentID, userID)
+		if err != nil || !deleted {
+			return
+		}
+
+		r.broadcast(Message{
+			Type: "bookmark-comment-deleted",
+			Payload: map[string]string{
+				"bookmarkId": req.BookmarkID,
+				"commentId":  req.CommentID,
+			},
+		}, "")
 	}
 }
 

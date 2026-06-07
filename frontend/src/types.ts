@@ -129,6 +129,15 @@ export interface RoomState {
   users: Record<string, User>;
 }
 
+export interface BookmarkComment {
+  id: string;
+  bookmarkId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  createdAt: number;
+}
+
 export interface PathBookmark {
   id: string;
   name: string;
@@ -143,6 +152,7 @@ export interface PathBookmark {
   createdBy: string;
   createdByName: string;
   createdAt: number;
+  comments?: BookmarkComment[];
 }
 
 export interface HeatmapState {
@@ -220,4 +230,22 @@ export interface PlaybackControlState {
   bookmarks: PlaybackBookmark[];
   isLoading: boolean;
   originalMapData: MapData | null;
+}
+
+export interface ComparePathInfo {
+  bookmark: PathBookmark;
+  color: string;
+}
+
+export interface CompareBookmarkState {
+  isActive: boolean;
+  selectedIds: string[];
+  comparingPaths: ComparePathInfo[];
+  hoverCell: Cell | null;
+}
+
+export interface TooltipData {
+  x: number;
+  y: number;
+  paths: ComparePathInfo[];
 }

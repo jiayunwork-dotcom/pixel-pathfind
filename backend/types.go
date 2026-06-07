@@ -81,6 +81,15 @@ type CursorUpdate struct {
 	Y      int    `json:"y"`
 }
 
+type BookmarkComment struct {
+	ID         string `json:"id"`
+	BookmarkID string `json:"bookmarkId"`
+	UserID     string `json:"userId"`
+	UserName   string `json:"userName"`
+	Content    string `json:"content"`
+	CreatedAt  int64  `json:"createdAt"`
+}
+
 type PathBookmark struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`

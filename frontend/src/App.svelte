@@ -13,7 +13,7 @@ import BookmarksPanel from './components/BookmarksPanel.svelte';
 import CompetitionView from './components/CompetitionView.svelte';
 import PlaybackPanel from './components/PlaybackPanel.svelte';
 import { applyOperationToMap } from './drawingTools';
-import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark } from './types';
+import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment } from './types';
 import { hasUniformCost, formatTime } from './utils';
 
   let showJoinModal = true;
@@ -25,6 +25,9 @@ import { hasUniformCost, formatTime } from './utils';
   let connectionStatus = 'disconnected';
 
   $: competitionMode = $pathfindingStore.competitionMode;
+  $: compareMode = $bookmarksStore.compareMode;
+  $: isCompareActive = compareMode.isActive;
+  $: isComparing = compareMode.comparingPaths.length > 0;
 
   onMount(() => {
     const savedUserName = localStorage.getItem('pixel-pathfind-username');
@@ -48,6 +51,9 @@ import { hasUniformCost, formatTime } from './utils';
         uiStore.setUsers(data.users);
         if (data.bookmarks) {
           bookmarksStore.setBookmarks(data.bookmarks);
+        }
+        if (data.bookmarkComments) {
+          bookmarksStore.setComments(data.bookmarkComments);
         }
         if (data.recording) {
           recordingStore.updateRecording(data.recording);
@@ -84,6 +90,13 @@ import { hasUniformCost, formatTime } from './utils';
       },
       onBookmarkRenamed: (data: { id: string; name: string }) => {
         bookmarksStore.renameBookmark(data.id, data.name);
+      },
+      onBookmarkCommentAdded: (comment: BookmarkComment) => {
+        bookmarksStore.addComment(comment);
+        uiStore.showToast(`${comment.userName} 对书签发表了新批注`, 3000);
+      },
+      onBookmarkCommentDeleted: (data: { bookmarkId: string; commentId: string }) => {
+        bookmarksStore.deleteComment(data.bookmarkId, data.commentId);
       },
       onRecordingUpdate: (data: { recording: RecordingState }) => {
         recordingStore.updateRecording(data.recording);
@@ -271,7 +284,7 @@ import { hasUniformCost, formatTime } from './utils';
       {#if competitionMode}
         <CompetitionView />
       {:else}
-        <aside class="left-panel w-64 border-r border-[#2d2d44] overflow-y-auto {$playbackStore.isActive ? 'panel-disabled' : ''}">
+        <aside class="left-panel w-64 border-r border-[#2d2d44] overflow-y-auto {$playbackStore.isActive || isComparing ? 'panel-disabled' : ''}">
           <Toolbar />
           <LayersPanel />
         </aside>
@@ -281,13 +294,22 @@ import { hasUniformCost, formatTime } from './utils';
           {#if $playbackStore.isActive}
             <PlaybackPanel />
           {/if}
+          {#if isComparing}
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 bg-[#f39c12] text-white px-4 py-2 rounded-lg shadow-lg text-sm font-semibold z-40">
+              📊 对比模式 - 正在对比 {compareMode.comparingPaths.length} 条路径
+            </div>
+          {/if}
         </main>
 
-        <aside class="right-panel w-80 border-l border-[#2d2d44] overflow-y-auto">
+        <aside class="right-panel w-80 border-l border-[#2d2d44] overflow-y-auto {isComparing ? 'panel-compare-mode' : ''}">
           <UsersPanel />
-          <PathfindingPanel />
+          <div class={isComparing ? 'panel-disabled' : ''}>
+            <PathfindingPanel />
+          </div>
           <BookmarksPanel />
-          <MapManager />
+          <div class={isComparing ? 'panel-disabled' : ''}>
+            <MapManager />
+          </div>
         </aside>
       {/if}
     </div>
@@ -352,5 +374,9 @@ import { hasUniformCost, formatTime } from './utils';
     opacity: 0.5;
     pointer-events: none;
     user-select: none;
+  }
+
+  .panel-compare-mode {
+    background: linear-gradient(180deg, #1a1a2e 0%, #16162a 100%);
   }
 </style>

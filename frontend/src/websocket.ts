@@ -1,9 +1,9 @@
-import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark } from './types';
+import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment } from './types';
 
 interface WebSocketCallbacks {
   onConnect?: () => void;
   onDisconnect?: () => void;
-  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[]; recording: RecordingState; playbacks: Record<string, PlaybackState> }) => void;
+  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[]; bookmarkComments: Record<string, BookmarkComment[]>; recording: RecordingState; playbacks: Record<string, PlaybackState> }) => void;
   onUserLeave?: (data: { userId: string; users: Record<string, User> }) => void;
   onCursor?: (cursor: CursorUpdate) => void;
   onOperation?: (op: Operation) => void;
@@ -12,6 +12,8 @@ interface WebSocketCallbacks {
   onBookmarkAdded?: (bookmark: PathBookmark) => void;
   onBookmarkDeleted?: (data: { id: string }) => void;
   onBookmarkRenamed?: (data: { id: string; name: string }) => void;
+  onBookmarkCommentAdded?: (comment: BookmarkComment) => void;
+  onBookmarkCommentDeleted?: (data: { bookmarkId: string; commentId: string }) => void;
   onRecordingUpdate?: (data: { recording: RecordingState }) => void;
   onRecordingStopped?: (data: { reason: string; message: string }) => void;
   onPlaybackStarted?: (data: { recording: RecordingState }) => void;
@@ -161,6 +163,12 @@ export class WebSocketClient {
       case 'playback-bookmarks':
         this.callbacks.onPlaybackBookmarks?.(message.payload);
         break;
+      case 'bookmark-comment-added':
+        this.callbacks.onBookmarkCommentAdded?.(message.payload);
+        break;
+      case 'bookmark-comment-deleted':
+        this.callbacks.onBookmarkCommentDeleted?.(message.payload);
+        break;
     }
   }
 
@@ -258,6 +266,36 @@ export class WebSocketClient {
       this.ws.send(JSON.stringify(message));
     } catch (e) {
       console.error('Failed to rename bookmark:', e);
+    }
+  }
+
+  addBookmarkComment(bookmarkId: string, content: string) {
+    if (!this.isConnected || !this.ws) return;
+
+    const message = {
+      type: 'bookmark-comment-add',
+      payload: { bookmarkId, content },
+    };
+
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to add bookmark comment:', e);
+    }
+  }
+
+  deleteBookmarkComment(bookmarkId: string, commentId: string) {
+    if (!this.isConnected || !this.ws) return;
+
+    const message = {
+      type: 'bookmark-comment-delete',
+      payload: { bookmarkId, commentId },
+    };
+
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to delete bookmark comment:', e);
     }
   }
 

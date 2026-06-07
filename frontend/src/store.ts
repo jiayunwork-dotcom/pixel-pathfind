@@ -20,6 +20,9 @@ import type {
   PlaybackBookmark,
   PlaybackSpeed,
   PlaybackControlState,
+  BookmarkComment,
+  CompareBookmarkState,
+  ComparePathInfo,
 } from './types';
 import { cellKey } from './utils';
 import { createEmptyMap } from './mapTemplates';
@@ -394,13 +397,30 @@ interface BookmarksState {
   bookmarks: PathBookmark[];
   selectedBookmarkId: string | null;
   replayingBookmark: PathBookmark | null;
+  comments: Record<string, BookmarkComment[]>;
+  lastReadCommentId: Record<string, string>;
+  newCommentBookmarks: Set<string>;
+  compareMode: CompareBookmarkState;
+  expandedBookmarkId: string | null;
 }
 
 const initialBookmarksState: BookmarksState = {
   bookmarks: [],
   selectedBookmarkId: null,
   replayingBookmark: null,
+  comments: {},
+  lastReadCommentId: {},
+  newCommentBookmarks: new Set(),
+  compareMode: {
+    isActive: false,
+    selectedIds: [],
+    comparingPaths: [],
+    hoverCell: null,
+  },
+  expandedBookmarkId: null,
 };
+
+const COMPARE_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFEAA7'];
 
 function createBookmarksStore() {
   const { subscribe, set, update } = writable<BookmarksState>(initialBookmarksState);
@@ -432,6 +452,10 @@ function createBookmarksStore() {
       });
     },
 
+    setComments: (comments: Record<string, BookmarkComment[]>) => {
+      update((state) => ({ ...state, comments }));
+    },
+
     addBookmark: (bookmark: PathBookmark) =>
       update((state) => {
         const bookmarks = [...state.bookmarks, bookmark];
@@ -449,7 +473,26 @@ function createBookmarksStore() {
         const { heatData, maxHeat } = calculateHeatmap(bookmarks);
         heatmapStore.setHeatData(heatData, maxHeat);
         const replayingBookmark = state.replayingBookmark?.id === id ? null : state.replayingBookmark;
-        return { ...state, bookmarks, replayingBookmark, selectedBookmarkId: state.selectedBookmarkId === id ? null : state.selectedBookmarkId };
+        const comments = { ...state.comments };
+        delete comments[id];
+        const lastReadCommentId = { ...state.lastReadCommentId };
+        delete lastReadCommentId[id];
+        const newCommentBookmarks = new Set(state.newCommentBookmarks);
+        newCommentBookmarks.delete(id);
+        const compareMode = { ...state.compareMode };
+        compareMode.selectedIds = compareMode.selectedIds.filter((bid) => bid !== id);
+        compareMode.comparingPaths = compareMode.comparingPaths.filter((p) => p.bookmark.id !== id);
+        return {
+          ...state,
+          bookmarks,
+          replayingBookmark,
+          comments,
+          lastReadCommentId,
+          newCommentBookmarks,
+          compareMode,
+          selectedBookmarkId: state.selectedBookmarkId === id ? null : state.selectedBookmarkId,
+          expandedBookmarkId: state.expandedBookmarkId === id ? null : state.expandedBookmarkId,
+        };
       }),
 
     renameBookmark: (id: string, name: string) =>
@@ -458,6 +501,171 @@ function createBookmarksStore() {
         const replayingBookmark = state.replayingBookmark?.id === id ? { ...state.replayingBookmark, name } : state.replayingBookmark;
         return { ...state, bookmarks, replayingBookmark };
       }),
+
+    addComment: (comment: BookmarkComment) =>
+      update((state) => {
+        const comments = { ...state.comments };
+        const bookmarkComments = [...(comments[comment.bookmarkId] || [])];
+        bookmarkComments.push(comment);
+        if (bookmarkComments.length > 20) {
+          bookmarkComments.splice(0, bookmarkComments.length - 20);
+        }
+        comments[comment.bookmarkId] = bookmarkComments;
+
+        const newCommentBookmarks = new Set(state.newCommentBookmarks);
+        if (state.expandedBookmarkId !== comment.bookmarkId) {
+          newCommentBookmarks.add(comment.bookmarkId);
+        }
+
+        const lastReadCommentId = { ...state.lastReadCommentId };
+        if (state.expandedBookmarkId === comment.bookmarkId) {
+          lastReadCommentId[comment.bookmarkId] = comment.id;
+        }
+
+        return { ...state, comments, newCommentBookmarks, lastReadCommentId };
+      }),
+
+    deleteComment: (bookmarkId: string, commentId: string) =>
+      update((state) => {
+        const comments = { ...state.comments };
+        const bookmarkComments = (comments[bookmarkId] || []).filter((c) => c.id !== commentId);
+        comments[bookmarkId] = bookmarkComments;
+        return { ...state, comments };
+      }),
+
+    markCommentsAsRead: (bookmarkId: string) =>
+      update((state) => {
+        const bookmarkComments = state.comments[bookmarkId] || [];
+        if (bookmarkComments.length === 0) return state;
+
+        const lastComment = bookmarkComments[bookmarkComments.length - 1];
+        const lastReadCommentId = { ...state.lastReadCommentId };
+        lastReadCommentId[bookmarkId] = lastComment.id;
+
+        const newCommentBookmarks = new Set(state.newCommentBookmarks);
+        newCommentBookmarks.delete(bookmarkId);
+
+        return { ...state, lastReadCommentId, newCommentBookmarks };
+      }),
+
+    getCommentCount: (bookmarkId: string) => {
+      const state = get(bookmarksStore);
+      return (state.comments[bookmarkId] || []).length;
+    },
+
+    hasNewComments: (bookmarkId: string) => {
+      const state = get(bookmarksStore);
+      return state.newCommentBookmarks.has(bookmarkId);
+    },
+
+    expandBookmark: (bookmarkId: string | null) =>
+      update((state) => {
+        if (bookmarkId) {
+          const newCommentBookmarks = new Set(state.newCommentBookmarks);
+          newCommentBookmarks.delete(bookmarkId);
+          const bookmarkComments = state.comments[bookmarkId] || [];
+          const lastReadCommentId = { ...state.lastReadCommentId };
+          if (bookmarkComments.length > 0) {
+            lastReadCommentId[bookmarkId] = bookmarkComments[bookmarkComments.length - 1].id;
+          }
+          return { ...state, expandedBookmarkId: bookmarkId, newCommentBookmarks, lastReadCommentId };
+        }
+        return { ...state, expandedBookmarkId: null };
+      }),
+
+    toggleCompareMode: () =>
+      update((state) => {
+        const isActive = !state.compareMode.isActive;
+        return {
+          ...state,
+          replayingBookmark: isActive ? null : state.replayingBookmark,
+          selectedBookmarkId: isActive ? null : state.selectedBookmarkId,
+          compareMode: {
+            isActive,
+            selectedIds: [],
+            comparingPaths: [],
+            hoverCell: null,
+          },
+        };
+      }),
+
+    toggleCompareSelection: (bookmarkId: string) =>
+      update((state) => {
+        if (!state.compareMode.isActive) return state;
+
+        const selectedIds = [...state.compareMode.selectedIds];
+        const idx = selectedIds.indexOf(bookmarkId);
+        if (idx >= 0) {
+          selectedIds.splice(idx, 1);
+        } else {
+          if (selectedIds.length >= 4) return state;
+          selectedIds.push(bookmarkId);
+        }
+
+        return {
+          ...state,
+          compareMode: {
+            ...state.compareMode,
+            selectedIds,
+          },
+        };
+      }),
+
+    startComparison: () =>
+      update((state) => {
+        if (!state.compareMode.isActive) return state;
+        if (state.compareMode.selectedIds.length < 2 || state.compareMode.selectedIds.length > 4) return state;
+
+        const comparingPaths: ComparePathInfo[] = state.compareMode.selectedIds
+          .map((id, idx) => {
+            const bookmark = state.bookmarks.find((b) => b.id === id);
+            if (!bookmark) return null;
+            return {
+              bookmark,
+              color: COMPARE_COLORS[idx],
+            };
+          })
+          .filter(Boolean) as ComparePathInfo[];
+
+        return {
+          ...state,
+          compareMode: {
+            ...state.compareMode,
+            comparingPaths,
+          },
+        };
+      }),
+
+    exitComparison: () =>
+      update((state) => ({
+        ...state,
+        compareMode: {
+          isActive: false,
+          selectedIds: [],
+          comparingPaths: [],
+          hoverCell: null,
+        },
+      })),
+
+    setCompareHoverCell: (cell: Cell | null) =>
+      update((state) => ({
+        ...state,
+        compareMode: {
+          ...state.compareMode,
+          hoverCell: cell,
+        },
+      })),
+
+    getPathsAtCell: (x: number, y: number): ComparePathInfo[] => {
+      const state = get(bookmarksStore);
+      const result: ComparePathInfo[] = [];
+      for (const pathInfo of state.compareMode.comparingPaths) {
+        if (pathInfo.bookmark.path.some((c) => c.x === x && c.y === y)) {
+          result.push(pathInfo);
+        }
+      }
+      return result;
+    },
 
     selectBookmark: (id: string | null) =>
       update((state) => ({ ...state, selectedBookmarkId: id })),
