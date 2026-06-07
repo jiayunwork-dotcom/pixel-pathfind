@@ -98,7 +98,9 @@ export async function bfs(
   end: Cell,
   onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
   stepDelay: number = 0,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  shouldStop?: () => boolean,
+  isPaused?: () => boolean
 ): Promise<AlgorithmResult> {
   const startTime = performance.now();
   const visited = new Set<string>();
@@ -114,6 +116,33 @@ export async function bfs(
   let exploredCount = 0;
 
   while (queue.length > 0) {
+    if (shouldStop?.()) {
+      return {
+        algorithm: 'bfs',
+        path: [],
+        exploredCount,
+        totalCost: 0,
+        pathLength: 0,
+        timeMs: performance.now() - startTime,
+        timeout: false,
+      };
+    }
+
+    while (isPaused?.()) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (shouldStop?.()) {
+        return {
+          algorithm: 'bfs',
+          path: [],
+          exploredCount,
+          totalCost: 0,
+          pathLength: 0,
+          timeMs: performance.now() - startTime,
+          timeout: false,
+        };
+      }
+    }
+
     if (performance.now() - startTime > timeoutMs) {
       return {
         algorithm: 'bfs',
@@ -150,6 +179,8 @@ export async function bfs(
       onStep(visited, openSet, { x: current.x, y: current.y });
       if (stepDelay > 0) {
         await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
@@ -187,7 +218,9 @@ export async function dijkstra(
   end: Cell,
   onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
   stepDelay: number = 0,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  shouldStop?: () => boolean,
+  isPaused?: () => boolean
 ): Promise<AlgorithmResult> {
   const startTime = performance.now();
   const visited = new Set<string>();
@@ -203,6 +236,33 @@ export async function dijkstra(
   let exploredCount = 0;
 
   while (!pq.isEmpty()) {
+    if (shouldStop?.()) {
+      return {
+        algorithm: 'dijkstra',
+        path: [],
+        exploredCount,
+        totalCost: 0,
+        pathLength: 0,
+        timeMs: performance.now() - startTime,
+        timeout: false,
+      };
+    }
+
+    while (isPaused?.()) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (shouldStop?.()) {
+        return {
+          algorithm: 'dijkstra',
+          path: [],
+          exploredCount,
+          totalCost: 0,
+          pathLength: 0,
+          timeMs: performance.now() - startTime,
+          timeout: false,
+        };
+      }
+    }
+
     if (performance.now() - startTime > timeoutMs) {
       return {
         algorithm: 'dijkstra',
@@ -241,6 +301,8 @@ export async function dijkstra(
       onStep(visited, openSet, { x: current.x, y: current.y });
       if (stepDelay > 0) {
         await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
@@ -291,7 +353,9 @@ export async function astar(
   heuristicWeight: number = 1,
   onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
   stepDelay: number = 0,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  shouldStop?: () => boolean,
+  isPaused?: () => boolean
 ): Promise<AlgorithmResult> {
   const startTime = performance.now();
   const visited = new Set<string>();
@@ -315,6 +379,33 @@ export async function astar(
   let exploredCount = 0;
 
   while (!pq.isEmpty()) {
+    if (shouldStop?.()) {
+      return {
+        algorithm: 'astar',
+        path: [],
+        exploredCount,
+        totalCost: 0,
+        pathLength: 0,
+        timeMs: performance.now() - startTime,
+        timeout: false,
+      };
+    }
+
+    while (isPaused?.()) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (shouldStop?.()) {
+        return {
+          algorithm: 'astar',
+          path: [],
+          exploredCount,
+          totalCost: 0,
+          pathLength: 0,
+          timeMs: performance.now() - startTime,
+          timeout: false,
+        };
+      }
+    }
+
     if (performance.now() - startTime > timeoutMs) {
       return {
         algorithm: 'astar',
@@ -353,6 +444,8 @@ export async function astar(
       onStep(visited, openSet, { x: current.x, y: current.y });
       if (stepDelay > 0) {
         await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
@@ -457,10 +550,12 @@ export async function jps(
   end: Cell,
   onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
   stepDelay: number = 0,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  shouldStop?: () => boolean,
+  isPaused?: () => boolean
 ): Promise<AlgorithmResult> {
   if (!hasUniformCost(mapData)) {
-    return astar(mapData, start, end, 'manhattan', 1, onStep, stepDelay, timeoutMs).then(
+    return astar(mapData, start, end, 'manhattan', 1, onStep, stepDelay, timeoutMs, shouldStop, isPaused).then(
       (result) => ({ ...result, algorithm: 'jps' as AlgorithmType })
     );
   }
@@ -487,6 +582,33 @@ export async function jps(
   let exploredCount = 0;
 
   while (!pq.isEmpty()) {
+    if (shouldStop?.()) {
+      return {
+        algorithm: 'jps',
+        path: [],
+        exploredCount,
+        totalCost: 0,
+        pathLength: 0,
+        timeMs: performance.now() - startTime,
+        timeout: false,
+      };
+    }
+
+    while (isPaused?.()) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (shouldStop?.()) {
+        return {
+          algorithm: 'jps',
+          path: [],
+          exploredCount,
+          totalCost: 0,
+          pathLength: 0,
+          timeMs: performance.now() - startTime,
+          timeout: false,
+        };
+      }
+    }
+
     if (performance.now() - startTime > timeoutMs) {
       return {
         algorithm: 'jps',
@@ -525,6 +647,8 @@ export async function jps(
       onStep(visited, openSet, { x: current.x, y: current.y });
       if (stepDelay > 0) {
         await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
@@ -584,7 +708,9 @@ export async function thetastar(
   heuristicWeight: number = 1,
   onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
   stepDelay: number = 0,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  shouldStop?: () => boolean,
+  isPaused?: () => boolean
 ): Promise<AlgorithmResult> {
   const startTime = performance.now();
   const visited = new Set<string>();
@@ -610,6 +736,33 @@ export async function thetastar(
   let exploredCount = 0;
 
   while (!pq.isEmpty()) {
+    if (shouldStop?.()) {
+      return {
+        algorithm: 'thetastar',
+        path: [],
+        exploredCount,
+        totalCost: 0,
+        pathLength: 0,
+        timeMs: performance.now() - startTime,
+        timeout: false,
+      };
+    }
+
+    while (isPaused?.()) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (shouldStop?.()) {
+        return {
+          algorithm: 'thetastar',
+          path: [],
+          exploredCount,
+          totalCost: 0,
+          pathLength: 0,
+          timeMs: performance.now() - startTime,
+          timeout: false,
+        };
+      }
+    }
+
     if (performance.now() - startTime > timeoutMs) {
       return {
         algorithm: 'thetastar',
@@ -662,6 +815,8 @@ export async function thetastar(
       onStep(visited, openSet, { x: current.x, y: current.y });
       if (stepDelay > 0) {
         await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
@@ -895,7 +1050,9 @@ export class DStarLitePlanner {
     end: Cell,
     onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
     stepDelay: number = 0,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
+    shouldStop?: () => boolean,
+    isPaused?: () => boolean
   ): Promise<AlgorithmResult> {
     const startTime = performance.now();
 
@@ -927,6 +1084,33 @@ export class DStarLitePlanner {
     let exploredCount = this.state.gScore.size;
 
     while (!(current.x === end.x && current.y === end.y)) {
+      if (shouldStop?.()) {
+        return {
+          algorithm: 'dstarlite',
+          path: [],
+          exploredCount,
+          totalCost: 0,
+          pathLength: 0,
+          timeMs: performance.now() - startTime,
+          timeout: false,
+        };
+      }
+
+      while (isPaused?.()) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (shouldStop?.()) {
+          return {
+            algorithm: 'dstarlite',
+            path: [],
+            exploredCount,
+            totalCost: 0,
+            pathLength: 0,
+            timeMs: performance.now() - startTime,
+            timeout: false,
+          };
+        }
+      }
+
       if (performance.now() - startTime > timeoutMs) {
         return {
           algorithm: 'dstarlite',
@@ -1120,8 +1304,10 @@ export async function dstarlite(
   heuristic: HeuristicType = 'manhattan',
   onStep?: (visited: Set<string>, openSet: Set<string>, current: Cell | null) => void,
   stepDelay: number = 0,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  shouldStop?: () => boolean,
+  isPaused?: () => boolean
 ): Promise<AlgorithmResult> {
   const planner = new DStarLitePlanner(mapData, heuristic);
-  return planner.plan(start, end, onStep, stepDelay, timeoutMs);
+  return planner.plan(start, end, onStep, stepDelay, timeoutMs, shouldStop, isPaused);
 }

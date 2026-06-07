@@ -49,8 +49,7 @@
     return newCommentBookmarks.has(bookmarkId);
   }
 
-  function toggleExpand(bookmarkId: string, e: Event) {
-    e.stopPropagation();
+  function toggleExpand(bookmarkId: string) {
     if (compareMode.isActive) return;
     if (expandedBookmarkId === bookmarkId) {
       bookmarksStore.expandBookmark(null);
@@ -92,16 +91,14 @@
     }
   }
 
-  function deleteBookmark(bookmark: PathBookmark, e: Event) {
-    e.stopPropagation();
+  function deleteBookmark(bookmark: PathBookmark) {
     if (confirm(`确定要删除书签"${bookmark.name}"吗?`)) {
       wsClient.deleteBookmark(bookmark.id);
       uiStore.showToast('书签已删除');
     }
   }
 
-  function startRename(bookmark: PathBookmark, e: Event) {
-    e.stopPropagation();
+  function startRename(bookmark: PathBookmark) {
     if (compareMode.isActive) return;
     editingId = bookmark.id;
     editingName = bookmark.name;
@@ -157,8 +154,7 @@
     newCommentText[bookmarkId] = '';
   }
 
-  function deleteComment(bookmarkId: string, commentId: string, e: Event) {
-    e.stopPropagation();
+  function deleteComment(bookmarkId: string, commentId: string) {
     if (confirm('确定要删除这条批注吗?')) {
       wsClient.deleteBookmarkComment(bookmarkId, commentId);
     }
@@ -285,6 +281,17 @@
       <div class="text-3xl mb-2">📑</div>
       <p>暂无书签</p>
       <p class="text-xs mt-1">运行寻路算法后可保存路径</p>
+      {#if compareMode.isActive}
+        <div class="mt-4 p-3 bg-[#f39c12]/20 border border-[#f39c12]/50 rounded-lg">
+          <p class="text-xs text-[#f39c12]">⚠️ 请先保存至少 2 条书签后再使用对比功能</p>
+          <button
+            on:click={toggleCompareMode}
+            class="mt-2 px-3 py-1.5 text-xs rounded bg-[#7f8c8d] hover:bg-[#95a5a6] text-white transition-all"
+          >
+            退出对比模式
+          </button>
+        </div>
+      {/if}
     </div>
   {:else}
     <div class="space-y-2 max-h-80 overflow-y-auto">
@@ -308,13 +315,13 @@
                 autofocus
               />
               <button
-                on:click={(e) => { e.stopPropagation(); saveRename(bookmark); }}
+                on:click|stopPropagation={() => saveRename(bookmark)}
                 class="px-2 py-1 rounded bg-[#27ae60] hover:bg-[#2ecc71] text-xs text-white"
               >
                 ✓
               </button>
               <button
-                on:click={(e) => { e.stopPropagation(); cancelRename(); }}
+                on:click|stopPropagation={() => cancelRename()}
                 class="px-2 py-1 rounded bg-[#7f8c8d] hover:bg-[#95a5a6] text-xs text-white"
               >
                 ✕
@@ -338,7 +345,7 @@
               </div>
               <div class="flex items-center gap-1 flex-shrink-0">
                 <button
-                  on:click={(e) => toggleExpand(bookmark.id, e)}
+                  on:click|stopPropagation={() => toggleExpand(bookmark.id)}
                   class="p-1 rounded hover:bg-[#4a9eff]/30 text-xs transition-transform {expandedBookmarkId === bookmark.id ? 'rotate-180' : ''}"
                   title="展开详情"
                 >
@@ -346,7 +353,7 @@
                 </button>
                 {#if !compareMode.isActive}
                   <button
-                    on:click={(e) => startRename(bookmark, e)}
+                    on:click|stopPropagation={() => startRename(bookmark)}
                     class="p-1 rounded hover:bg-[#4a9eff]/30 text-xs"
                     title="重命名"
                   >
@@ -354,7 +361,7 @@
                   </button>
                 {/if}
                 <button
-                  on:click={(e) => deleteBookmark(bookmark, e)}
+                  on:click|stopPropagation={() => deleteBookmark(bookmark)}
                   class="p-1 rounded hover:bg-[#e74c3c]/30 text-xs"
                   title="删除"
                 >
@@ -428,7 +435,7 @@
                     }}
                   />
                   <button
-                    on:click={(e) => { e.stopPropagation(); addComment(bookmark.id); }}
+                    on:click|stopPropagation={() => addComment(bookmark.id)}
                     disabled={!newCommentText[bookmark.id]?.trim()}
                     class="px-3 py-1.5 rounded bg-[#4a9eff] hover:bg-[#3a8eef] text-xs text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
@@ -455,7 +462,7 @@
                         </div>
                         {#if $mapStore.currentUserId === comment.userId}
                           <button
-                            on:click={(e) => deleteComment(bookmark.id, comment.id, e)}
+                            on:click|stopPropagation={() => deleteComment(bookmark.id, comment.id)}
                             class="text-[9px] text-[#e74c3c] hover:text-[#c0392b] px-1"
                             title="删除批注"
                           >
