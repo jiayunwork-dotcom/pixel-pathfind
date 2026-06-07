@@ -164,6 +164,9 @@ export async function bfs(
     if (current.x === end.x && current.y === end.y) {
       const path = reconstructPath(current);
       const totalCost = path.reduce((sum, cell) => sum + getMovementCost(mapData, cell.x, cell.y), 0);
+      if (onStep && stepDelay === 0) {
+        onStep(visited, openSet, { x: current.x, y: current.y });
+      }
       return {
         algorithm: 'bfs',
         path,
@@ -175,13 +178,9 @@ export async function bfs(
       };
     }
 
-    if (onStep) {
+    if (onStep && stepDelay > 0) {
       onStep(visited, openSet, { x: current.x, y: current.y });
-      if (stepDelay > 0) {
-        await new Promise((resolve) => setTimeout(resolve, stepDelay));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
     }
 
     const neighbors = getNeighbors(current.x, current.y, false);
@@ -286,6 +285,9 @@ export async function dijkstra(
     if (current.x === end.x && current.y === end.y) {
       const path = reconstructPath(current);
       const totalCost = path.reduce((sum, cell) => sum + getMovementCost(mapData, cell.x, cell.y), 0);
+      if (onStep && stepDelay === 0) {
+        onStep(visited, openSet, { x: current.x, y: current.y });
+      }
       return {
         algorithm: 'dijkstra',
         path,
@@ -297,13 +299,9 @@ export async function dijkstra(
       };
     }
 
-    if (onStep) {
+    if (onStep && stepDelay > 0) {
       onStep(visited, openSet, { x: current.x, y: current.y });
-      if (stepDelay > 0) {
-        await new Promise((resolve) => setTimeout(resolve, stepDelay));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
     }
 
     const neighbors = getNeighbors(current.x, current.y, true);
@@ -429,6 +427,9 @@ export async function astar(
     if (current.x === end.x && current.y === end.y) {
       const path = reconstructPath(current);
       const totalCost = path.reduce((sum, cell) => sum + getMovementCost(mapData, cell.x, cell.y), 0);
+      if (onStep && stepDelay === 0) {
+        onStep(visited, openSet, { x: current.x, y: current.y });
+      }
       return {
         algorithm: 'astar',
         path,
@@ -440,13 +441,9 @@ export async function astar(
       };
     }
 
-    if (onStep) {
+    if (onStep && stepDelay > 0) {
       onStep(visited, openSet, { x: current.x, y: current.y });
-      if (stepDelay > 0) {
-        await new Promise((resolve) => setTimeout(resolve, stepDelay));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
     }
 
     const neighbors = getNeighbors(current.x, current.y, true);
@@ -632,6 +629,9 @@ export async function jps(
     if (current.x === end.x && current.y === end.y) {
       const path = reconstructPath(current);
       const totalCost = path.reduce((sum, cell) => sum + getMovementCost(mapData, cell.x, cell.y), 0);
+      if (onStep && stepDelay === 0) {
+        onStep(visited, openSet, { x: current.x, y: current.y });
+      }
       return {
         algorithm: 'jps',
         path,
@@ -643,13 +643,9 @@ export async function jps(
       };
     }
 
-    if (onStep) {
+    if (onStep && stepDelay > 0) {
       onStep(visited, openSet, { x: current.x, y: current.y });
-      if (stepDelay > 0) {
-        await new Promise((resolve) => setTimeout(resolve, stepDelay));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
     }
 
     const directions = [
@@ -800,6 +796,9 @@ export async function thetastar(
         totalCost += euclideanDistance(smoothPath[i], smoothPath[i + 1]);
       }
 
+      if (onStep && stepDelay === 0) {
+        onStep(visited, openSet, { x: current.x, y: current.y });
+      }
       return {
         algorithm: 'thetastar',
         path: smoothPath,
@@ -811,13 +810,9 @@ export async function thetastar(
       };
     }
 
-    if (onStep) {
+    if (onStep && stepDelay > 0) {
       onStep(visited, openSet, { x: current.x, y: current.y });
-      if (stepDelay > 0) {
-        await new Promise((resolve) => setTimeout(resolve, stepDelay));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
     }
 
     const neighbors = getNeighbors(current.x, current.y, true);

@@ -64,6 +64,11 @@
       return;
     }
     replayBookmark(bookmark);
+    if (expandedBookmarkId === bookmark.id) {
+      bookmarksStore.expandBookmark(null);
+    } else {
+      bookmarksStore.expandBookmark(bookmark.id);
+    }
   }
 
   function replayBookmark(bookmark: PathBookmark) {
@@ -169,17 +174,15 @@
     <h3 class="font-bold text-[#4a9eff]">路径书签</h3>
     <div class="flex items-center gap-2">
       <span class="text-xs text-muted">{bookmarks.length}/20</span>
-      {#if !isComparing}
-        <button
-          on:click={toggleCompareMode}
-          class="px-2 py-1 text-xs rounded transition-all {compareMode.isActive
-            ? 'bg-[#f39c12] text-white'
-            : 'bg-[#2d2d44] hover:bg-[#3d3d54] text-muted'}"
-          title="对比模式"
-        >
-          {compareMode.isActive ? '退出对比' : '📊 对比'}
-        </button>
-      {/if}
+      <button
+        on:click={isComparing ? exitComparison : toggleCompareMode}
+        class="px-3 py-1 text-xs rounded font-semibold transition-all {compareMode.isActive || isComparing
+          ? 'bg-[#f39c12] hover:bg-[#e08e0b] text-white shadow-lg shadow-[#f39c12]/30'
+          : 'bg-[#4a9eff] hover:bg-[#3a8eef] text-white shadow-lg shadow-[#4a9eff]/30'}"
+        title="对比模式"
+      >
+        {isComparing ? '✕ 退出对比' : compareMode.isActive ? '✕ 取消选择' : '📊 对比模式'}
+      </button>
     </div>
   </div>
 
@@ -411,8 +414,16 @@
             <span>{formatDate(bookmark.createdAt)}</span>
           </div>
 
+          {#if !compareMode.isActive}
+            <div class="mt-2 text-[10px] text-center">
+              <span class="text-[#4a9eff]">
+                {expandedBookmarkId === bookmark.id ? '▲ 点击收起详情' : '▼ 点击展开查看批注'}
+              </span>
+            </div>
+          {/if}
+
           {#if bookmark.id === selectedBookmarkId && !compareMode.isActive}
-            <div class="mt-2 text-xs text-[#4a9eff] text-center">
+            <div class="mt-1 text-xs text-[#4a9eff] text-center">
               点击地图任意位置取消回放
             </div>
           {/if}
@@ -486,9 +497,10 @@
 
   <div class="mt-3 p-2 bg-[#2d2d44]/50 rounded-lg">
     <div class="text-xs text-muted space-y-1">
-      <div>• 点击书签可回放路径</div>
-      <div>• 点击 ▼ 展开查看和添加批注</div>
-      <div>• 同一房间内所有用户共享书签</div>
+      <div>• 点击书签可回放路径并展开详情</div>
+      <div>• 在详情中可添加和查看批注</div>
+      <div>• 点击「📊 对比模式」可选择多条书签对比</div>
+      <div>• 同一房间内所有用户共享书签和批注</div>
       <div>• 最多保存20条书签，超出自动删除最早</div>
     </div>
   </div>
