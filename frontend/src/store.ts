@@ -578,9 +578,14 @@ function createPlaybackStore() {
     const clampedIdx = Math.max(0, Math.min(targetIdx, state.operations.length));
 
     const newMapData = getMapDataAtOperation(clampedIdx, state.operations, state.snapshots, state.originalMapData);
-    const currentTime = clampedIdx > 0 && clampedIdx <= state.operations.length
-      ? state.operations[Math.min(clampedIdx - 1, state.operations.length - 1)].timeOffset
-      : 0;
+    let currentTime = 0;
+    if (clampedIdx > 0 && clampedIdx <= state.operations.length && state.operations.length > 0) {
+      const opIndex = Math.min(clampedIdx - 1, state.operations.length - 1);
+      const op = state.operations[opIndex];
+      if (op) {
+        currentTime = op.timeOffset;
+      }
+    }
 
     mapStore.setMapData(newMapData);
 
@@ -594,6 +599,7 @@ function createPlaybackStore() {
   function play() {
     const state = get(playbackStore);
     if (!state.isActive || state.isPlaying) return;
+    if (state.operations.length === 0) return;
     if (state.currentOperationIdx >= state.operations.length) {
       jumpToOperation(0);
     }
@@ -602,21 +608,28 @@ function createPlaybackStore() {
 
     const tick = () => {
       const currentState = get(playbackStore);
-      if (!currentState.isPlaying || currentState.currentOperationIdx >= currentState.operations.length) {
+      if (!currentState.isPlaying || currentState.operations.length === 0 || currentState.currentOperationIdx >= currentState.operations.length) {
         stop();
         return;
       }
 
       const nextIdx = currentState.currentOperationIdx + 1;
+      if (nextIdx > currentState.operations.length) {
+        stop();
+        return;
+      }
+
       jumpToOperation(nextIdx);
 
       const nextState = get(playbackStore);
       let delay = 1000 / currentState.speed;
 
-      if (nextIdx < currentState.operations.length) {
+      if (nextIdx < currentState.operations.length && nextIdx > 0) {
         const currentOp = currentState.operations[Math.max(0, nextIdx - 1)];
         const nextOp = currentState.operations[nextIdx];
-        delay = (nextOp.timeOffset - currentOp.timeOffset) / currentState.speed;
+        if (currentOp && nextOp) {
+          delay = (nextOp.timeOffset - currentOp.timeOffset) / currentState.speed;
+        }
       }
 
       playTimer = window.setTimeout(tick, Math.max(10, delay));
@@ -643,13 +656,15 @@ function createPlaybackStore() {
 
   function stepForward() {
     const state = get(playbackStore);
-    if (!state.isActive) return;
+    if (!state.isActive || state.operations.length === 0) return;
+    if (state.currentOperationIdx >= state.operations.length) return;
     jumpToOperation(state.currentOperationIdx + 1);
   }
 
   function stepBackward() {
     const state = get(playbackStore);
-    if (!state.isActive) return;
+    if (!state.isActive || state.operations.length === 0) return;
+    if (state.currentOperationIdx <= 0) return;
     jumpToOperation(state.currentOperationIdx - 1);
   }
 
@@ -709,6 +724,7 @@ function createPlaybackStore() {
 
   function startPlayback(recording: RecordingState, originalMapData: MapData) {
     stop();
+    const emptyMap = createEmptyMap(originalMapData.width, originalMapData.height);
     set({
       isActive: true,
       isPlaying: false,
@@ -721,7 +737,7 @@ function createPlaybackStore() {
       snapshots: [],
       bookmarks: [],
       isLoading: true,
-      originalMapData: deepClone(originalMapData),
+      originalMapData: emptyMap,
     });
     wsClient.startPlayback();
     wsClient.requestRecordedOps(0, -1);

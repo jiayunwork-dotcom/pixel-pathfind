@@ -93,7 +93,6 @@ import { hasUniformCost, formatTime } from './utils';
         uiStore.showToast(data.message, 5000);
       },
       onPlaybackStarted: (data: { recording: RecordingState }) => {
-        playbackStore.setLoading(false);
       },
       onPlaybackUserStarted: (data: { userId: string; userName: string; message: string }) => {
         uiStore.showToast(data.message, 3000);
@@ -272,7 +271,7 @@ import { hasUniformCost, formatTime } from './utils';
       {#if competitionMode}
         <CompetitionView />
       {:else}
-        <aside class="left-panel w-64 border-r border-[#2d2d44] overflow-y-auto {$playbackStore.isActive ? 'opacity-50 pointer-events-none' : ''}">
+        <aside class="left-panel w-64 border-r border-[#2d2d44] overflow-y-auto {$playbackStore.isActive ? 'panel-disabled' : ''}">
           <Toolbar />
           <LayersPanel />
         </aside>
@@ -347,5 +346,11 @@ import { hasUniformCost, formatTime } from './utils';
     50% {
       opacity: 0.4;
     }
+  }
+
+  .panel-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
   }
 </style>

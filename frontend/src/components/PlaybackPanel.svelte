@@ -428,14 +428,15 @@
 
     <div class="controls">
       <button on:click={stepBackward} class="control-btn" title="上一帧"
-              disabled={state.currentOperationIdx === 0}>
+              disabled={state.currentOperationIdx === 0 || state.operations.length === 0}>
         ⏮️
       </button>
-      <button on:click={togglePlay} class="control-btn play-btn" title={state.isPlaying ? '暂停' : '播放'}>
+      <button on:click={togglePlay} class="control-btn play-btn" title={state.isPlaying ? '暂停' : '播放'}
+              disabled={state.operations.length === 0}>
         {state.isPlaying ? '⏸️' : '▶️'}
       </button>
       <button on:click={stepForward} class="control-btn" title="下一帧"
-              disabled={state.currentOperationIdx >= state.totalOperations}>
+              disabled={state.currentOperationIdx >= state.totalOperations || state.operations.length === 0}>
         ⏭️
       </button>
 
@@ -731,6 +732,10 @@
   .control-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .control-btn:disabled:hover {
+    background: #0d0d1a;
   }
 
   .play-btn {
