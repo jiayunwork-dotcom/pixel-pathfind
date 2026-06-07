@@ -97,6 +97,52 @@ type PathBookmark struct {
 	CreatedAt      int64     `json:"createdAt"`
 }
 
+type RecordedOperation struct {
+	ID           string      `json:"id"`
+	UserID       string      `json:"userId"`
+	UserName     string      `json:"userName"`
+	Timestamp    int64       `json:"timestamp"`
+	TimeOffset   int64       `json:"timeOffset"`
+	Type         string      `json:"type"`
+	Layer        LayerType   `json:"layer"`
+	Cells        []CellOp    `json:"cells"`
+	BeforeValues []interface{} `json:"beforeValues"`
+	AfterValues  []interface{} `json:"afterValues"`
+}
+
+type MapSnapshot struct {
+	ID            string    `json:"id"`
+	RoomID        string    `json:"roomId"`
+	OperationIdx  int       `json:"operationIdx"`
+	TimeOffset    int64     `json:"timeOffset"`
+	MapData       MapData   `json:"mapData"`
+	CreatedAt     int64     `json:"createdAt"`
+}
+
+type PlaybackBookmark struct {
+	ID         string `json:"id"`
+	RoomID     string `json:"roomId"`
+	TimeOffset int64  `json:"timeOffset"`
+	OperationIdx int  `json:"operationIdx"`
+	Note       string `json:"note"`
+	CreatedBy  string `json:"createdBy"`
+	CreatedAt  int64  `json:"createdAt"`
+}
+
+type RecordingState struct {
+	IsRecording    bool    `json:"isRecording"`
+	StartTime      int64   `json:"startTime"`
+	OperationCount int     `json:"operationCount"`
+	MaxOperations  int     `json:"maxOperations"`
+	IsStopped      bool    `json:"isStopped"`
+}
+
+type PlaybackState struct {
+	UserID   string `json:"userId"`
+	UserName string `json:"userName"`
+	IsActive bool   `json:"isActive"`
+}
+
 type RoomState struct {
 	ID         string                `json:"id"`
 	MapData    MapData               `json:"mapData"`
@@ -104,4 +150,6 @@ type RoomState struct {
 	Operations []Operation           `json:"operations"`
 	Bookmarks  []PathBookmark        `json:"bookmarks"`
 	CreatedAt  time.Time             `json:"createdAt"`
+	Recording  RecordingState        `json:"recording"`
+	Playbacks  map[string]PlaybackState `json:"playbacks"`
 }

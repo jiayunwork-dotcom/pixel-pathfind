@@ -17,6 +17,12 @@ var userColors = []string{
 	"#BB8FCE", "#85C1E9", "#F8B500", "#00CED1",
 }
 
+const (
+	SnapshotInterval = 200
+	MaxRecordedOps   = 10000
+	MaxBookmarks     = 30
+)
+
 type RoomManager struct {
 	rooms  map[string]*Room
 	store  *Store
@@ -77,6 +83,14 @@ func (rm *RoomManager) CreateRoom() string {
 			Users:     make(map[string]*User),
 			Bookmarks: []PathBookmark{},
 			CreatedAt: time.Now(),
+			Recording: RecordingState{
+				IsRecording:    true,
+				StartTime:      time.Now().UnixNano() / int64(time.Millisecond),
+				OperationCount: 0,
+				MaxOperations:  MaxRecordedOps,
+				IsStopped:      false,
+			},
+			Playbacks: make(map[string]PlaybackState),
 		},
 		clients: make(map[string]*websocket.Conn),
 		store:   rm.store,
@@ -144,12 +158,14 @@ func (rm *RoomManager) JoinRoom(roomID, userName string, conn *websocket.Conn) (
 	joinMsg := Message{
 		Type: "user-join",
 		Payload: map[string]interface{}{
-			"user":      user,
-			"users":     room.state.Users,
-			"roomId":    roomID,
-			"mapData":   room.state.MapData,
-			"yourId":    userID,
-			"bookmarks": room.state.Bookmarks,
+			"user":        user,
+			"users":       room.state.Users,
+			"roomId":      roomID,
+			"mapData":     room.state.MapData,
+			"yourId":      userID,
+			"bookmarks":   room.state.Bookmarks,
+			"recording":   room.state.Recording,
+			"playbacks":   room.state.Playbacks,
 		},
 	}
 
@@ -174,6 +190,17 @@ func (rm *RoomManager) LeaveRoom(roomID, userID string) {
 
 	delete(room.state.Users, userID)
 	delete(room.clients, userID)
+
+	if _, exists := room.state.Playbacks[userID]; exists {
+		delete(room.state.Playbacks, userID)
+		room.broadcast(Message{
+			Type: "playback-user-stopped",
+			Payload: map[string]interface{}{
+				"userId": userID,
+			},
+		}, "")
+	}
+
 	room.store.SaveRoom(room.state)
 
 	leaveMsg := Message{
@@ -185,6 +212,13 @@ func (rm *RoomManager) LeaveRoom(roomID, userID string) {
 	}
 
 	room.broadcast(leaveMsg, "")
+
+	if len(room.state.Users) == 0 {
+		room.store.DeleteRoom(roomID)
+		rm.mu.Lock()
+		delete(rm.rooms, roomID)
+		rm.mu.Unlock()
+	}
 }
 
 func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMessage) {
@@ -203,6 +237,10 @@ func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMess
 			user.Position = &Cell{X: cursor.X, Y: cursor.Y}
 		}
 
+		if playback, exists := r.state.Playbacks[userID]; exists && playback.IsActive {
+			return
+		}
+
 		r.broadcast(Message{
 			Type:    "cursor",
 			Payload: cursor,
@@ -218,14 +256,103 @@ func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMess
 		op.UserID = userID
 		op.Timestamp = time.Now().UnixNano() / int64(time.Millisecond)
 
-		r.applyOperation(op)
-		r.store.SaveOperation(r.ID, op)
-		r.store.SaveRoom(r.state)
+		if r.state.Recording.IsRecording && !r.state.Recording.IsStopped {
+			if r.state.Recording.OperationCount >= r.state.Recording.MaxOperations {
+				r.state.Recording.IsStopped = true
+				r.state.Recording.IsRecording = false
+				r.broadcast(Message{
+					Type: "recording-stopped",
+					Payload: map[string]interface{}{
+						"reason": "max_operations",
+						"message": "录制已达到最大操作数限制",
+					},
+				}, "")
+				return
+			}
 
-		r.broadcast(Message{
-			Type:    "operation",
-			Payload: op,
-		}, "")
+			userName := ""
+			if user, exists := r.state.Users[userID]; exists {
+				userName = user.Name
+			}
+
+			timeOffset := op.Timestamp - r.state.Recording.StartTime
+			beforeValues := make([]interface{}, len(op.Cells))
+			afterValues := make([]interface{}, len(op.Cells))
+
+			for i, cell := range op.Cells {
+				key := fmt.Sprintf("%d,%d", cell.X, cell.Y)
+				tile, exists := r.state.MapData.Tiles[key]
+				if !exists {
+					tile = TileData{}
+				}
+
+				switch op.Layer {
+				case LayerTerrain:
+					beforeValues[i] = tile.Terrain
+				case LayerObstacle:
+					beforeValues[i] = tile.Obstacle
+				case LayerDecoration:
+					beforeValues[i] = tile.Decoration
+				case LayerEvent:
+					beforeValues[i] = tile.Event
+				}
+				afterValues[i] = cell.Value
+			}
+
+			recordedOp := RecordedOperation{
+				ID:           op.ID,
+				UserID:       userID,
+				UserName:     userName,
+				Timestamp:    op.Timestamp,
+				TimeOffset:   timeOffset,
+				Type:         op.Type,
+				Layer:        op.Layer,
+				Cells:        op.Cells,
+				BeforeValues: beforeValues,
+				AfterValues:  afterValues,
+			}
+
+			r.applyOperation(op)
+			r.store.SaveOperation(r.ID, op)
+			r.store.SaveRecordedOperation(r.ID, recordedOp)
+
+			r.state.Recording.OperationCount++
+
+			if r.state.Recording.OperationCount%SnapshotInterval == 0 {
+				snapshot := MapSnapshot{
+					ID:           uuid.New().String(),
+					RoomID:       r.ID,
+					OperationIdx: r.state.Recording.OperationCount,
+					TimeOffset:   timeOffset,
+					MapData:      deepCopyMapData(r.state.MapData),
+					CreatedAt:    time.Now().UnixNano() / int64(time.Millisecond),
+				}
+				r.store.SaveSnapshot(r.ID, snapshot)
+			}
+
+			r.store.SaveRoom(r.state)
+
+			r.broadcast(Message{
+				Type:    "operation",
+				Payload: op,
+			}, "")
+
+			r.broadcast(Message{
+				Type: "recording-update",
+				Payload: map[string]interface{}{
+					"recording": r.state.Recording,
+				},
+			}, "")
+		} else {
+			r.applyOperation(op)
+			r.store.SaveOperation(r.ID, op)
+			r.store.SaveRoom(r.state)
+
+			r.broadcast(Message{
+				Type:    "operation",
+				Payload: op,
+			}, "")
+		}
 
 	case "request-sync":
 		var req struct {
@@ -321,6 +448,184 @@ func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMess
 			Type:    "bookmark-renamed",
 			Payload: req,
 		}, "")
+
+	case "playback-start":
+		userName := ""
+		if user, exists := r.state.Users[userID]; exists {
+			userName = user.Name
+		}
+
+		r.state.Playbacks[userID] = PlaybackState{
+			UserID:   userID,
+			UserName: userName,
+			IsActive: true,
+		}
+
+		r.broadcast(Message{
+			Type: "playback-user-started",
+			Payload: map[string]interface{}{
+				"userId":   userID,
+				"userName": userName,
+				"message":  userName + " 正在回放录制",
+			},
+		}, userID)
+
+		if conn, exists := r.clients[userID]; exists {
+			respMsg := Message{
+				Type: "playback-started",
+				Payload: map[string]interface{}{
+					"recording": r.state.Recording,
+				},
+			}
+			data, _ := json.Marshal(respMsg)
+			conn.WriteMessage(websocket.TextMessage, data)
+		}
+
+	case "playback-stop":
+		delete(r.state.Playbacks, userID)
+
+		r.broadcast(Message{
+			Type: "playback-user-stopped",
+			Payload: map[string]interface{}{
+				"userId": userID,
+			},
+		}, "")
+
+	case "request-recorded-ops":
+		var req struct {
+			FromIdx int `json:"fromIdx"`
+			ToIdx   int `json:"toIdx"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		ops, err := r.store.GetRecordedOperations(r.ID, req.FromIdx, req.ToIdx)
+		if err != nil {
+			return
+		}
+
+		if conn, exists := r.clients[userID]; exists {
+			respMsg := Message{
+				Type: "recorded-ops",
+				Payload: map[string]interface{}{
+					"operations": ops,
+					"fromIdx":    req.FromIdx,
+					"toIdx":      req.ToIdx,
+				},
+			}
+			data, _ := json.Marshal(respMsg)
+			conn.WriteMessage(websocket.TextMessage, data)
+		}
+
+	case "request-snapshots":
+		snapshots, err := r.store.GetSnapshots(r.ID)
+		if err != nil {
+			return
+		}
+
+		if conn, exists := r.clients[userID]; exists {
+			respMsg := Message{
+				Type: "snapshots",
+				Payload: map[string]interface{}{
+					"snapshots": snapshots,
+				},
+			}
+			data, _ := json.Marshal(respMsg)
+			conn.WriteMessage(websocket.TextMessage, data)
+		}
+
+	case "playback-bookmark-add":
+		var req struct {
+			TimeOffset   int64  `json:"timeOffset"`
+			OperationIdx int    `json:"operationIdx"`
+			Note         string `json:"note"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		if len(req.Note) > 50 {
+			req.Note = req.Note[:50]
+		}
+
+		bookmark := PlaybackBookmark{
+			ID:           uuid.New().String(),
+			RoomID:       r.ID,
+			TimeOffset:   req.TimeOffset,
+			OperationIdx: req.OperationIdx,
+			Note:         req.Note,
+			CreatedBy:    userID,
+			CreatedAt:    time.Now().UnixNano() / int64(time.Millisecond),
+		}
+
+		if err := r.store.AddPlaybackBookmark(r.ID, bookmark); err != nil {
+			return
+		}
+
+		bookmarks, _ := r.store.GetPlaybackBookmarks(r.ID)
+		if len(bookmarks) > MaxBookmarks {
+			bookmarks = bookmarks[len(bookmarks)-MaxBookmarks:]
+			r.store.SavePlaybackBookmarks(r.ID, bookmarks)
+		}
+
+		r.broadcast(Message{
+			Type: "playback-bookmark-added",
+			Payload: bookmark,
+		}, "")
+
+	case "playback-bookmark-delete":
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		if err := r.store.DeletePlaybackBookmark(r.ID, req.ID); err != nil {
+			return
+		}
+
+		r.broadcast(Message{
+			Type: "playback-bookmark-deleted",
+			Payload: map[string]string{"id": req.ID},
+		}, "")
+
+	case "request-playback-bookmarks":
+		bookmarks, err := r.store.GetPlaybackBookmarks(r.ID)
+		if err != nil {
+			return
+		}
+
+		if conn, exists := r.clients[userID]; exists {
+			respMsg := Message{
+				Type: "playback-bookmarks",
+				Payload: map[string]interface{}{
+					"bookmarks": bookmarks,
+				},
+			}
+			data, _ := json.Marshal(respMsg)
+			conn.WriteMessage(websocket.TextMessage, data)
+		}
+	}
+}
+
+func deepCopyMapData(m MapData) MapData {
+	tiles := make(map[string]TileData, len(m.Tiles))
+	for k, v := range m.Tiles {
+		tiles[k] = v
+	}
+
+	layers := make(map[LayerType]LayerInfo, len(m.Layers))
+	for k, v := range m.Layers {
+		layers[k] = v
+	}
+
+	return MapData{
+		Width:  m.Width,
+		Height: m.Height,
+		Tiles:  tiles,
+		Layers: layers,
 	}
 }
 

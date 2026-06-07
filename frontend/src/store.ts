@@ -13,6 +13,13 @@ import type {
   SearchState,
   PathBookmark,
   HeatmapState,
+  RecordingState,
+  PlaybackState,
+  RecordedOperation,
+  MapSnapshot,
+  PlaybackBookmark,
+  PlaybackSpeed,
+  PlaybackControlState,
 } from './types';
 import { cellKey } from './utils';
 import { createEmptyMap } from './mapTemplates';
@@ -493,8 +500,275 @@ function createHeatmapStore() {
   };
 }
 
+const initialRecordingState: RecordingState = {
+  isRecording: false,
+  startTime: 0,
+  operationCount: 0,
+  maxOperations: 10000,
+  isStopped: false,
+};
+
+function createRecordingStore() {
+  const { subscribe, set, update } = writable<RecordingState>(initialRecordingState);
+
+  return {
+    subscribe,
+    set,
+    updateRecording: (recording: RecordingState) => set(recording),
+    updateOperationCount: (count: number) =>
+      update((state) => ({ ...state, operationCount: count })),
+    stopRecording: (reason: string) =>
+      update((state) => ({ ...state, isRecording: false, isStopped: true })),
+    reset: () => set(initialRecordingState),
+  };
+}
+
+const initialPlaybackState: PlaybackControlState = {
+  isActive: false,
+  isPlaying: false,
+  currentTime: 0,
+  totalDuration: 0,
+  currentOperationIdx: 0,
+  totalOperations: 0,
+  speed: 1,
+  operations: [],
+  snapshots: [],
+  bookmarks: [],
+  isLoading: false,
+  originalMapData: null,
+};
+
+function createPlaybackStore() {
+  const { subscribe, set, update } = writable<PlaybackControlState>(initialPlaybackState);
+  let playTimer: number | null = null;
+
+  function getMapDataAtOperation(targetIdx: number, operations: RecordedOperation[], snapshots: MapSnapshot[], originalMap: MapData): MapData {
+    let baseMap: MapData;
+    let startIdx = 0;
+
+    const sortedSnapshots = [...snapshots].sort((a, b) => a.operationIdx - b.operationIdx);
+    let nearestSnapshot: MapSnapshot | null = null;
+    for (const snapshot of sortedSnapshots) {
+      if (snapshot.operationIdx <= targetIdx) {
+        nearestSnapshot = snapshot;
+      } else {
+        break;
+      }
+    }
+
+    if (nearestSnapshot) {
+      baseMap = deepClone(nearestSnapshot.mapData);
+      startIdx = nearestSnapshot.operationIdx;
+    } else {
+      baseMap = deepClone(originalMap);
+    }
+
+    for (let i = startIdx; i < targetIdx && i < operations.length; i++) {
+      const op = operations[i];
+      applyOperationToMap(baseMap, op.cells, op.layer);
+    }
+
+    return baseMap;
+  }
+
+  function jumpToOperation(targetIdx: number) {
+    const state = get(playbackStore);
+    if (!state.isActive || !state.originalMapData) return;
+
+    const clampedIdx = Math.max(0, Math.min(targetIdx, state.operations.length));
+
+    const newMapData = getMapDataAtOperation(clampedIdx, state.operations, state.snapshots, state.originalMapData);
+    const currentTime = clampedIdx > 0 && clampedIdx <= state.operations.length
+      ? state.operations[Math.min(clampedIdx - 1, state.operations.length - 1)].timeOffset
+      : 0;
+
+    mapStore.setMapData(newMapData);
+
+    update((s) => ({
+      ...s,
+      currentOperationIdx: clampedIdx,
+      currentTime,
+    }));
+  }
+
+  function play() {
+    const state = get(playbackStore);
+    if (!state.isActive || state.isPlaying) return;
+    if (state.currentOperationIdx >= state.operations.length) {
+      jumpToOperation(0);
+    }
+
+    update((s) => ({ ...s, isPlaying: true }));
+
+    const tick = () => {
+      const currentState = get(playbackStore);
+      if (!currentState.isPlaying || currentState.currentOperationIdx >= currentState.operations.length) {
+        stop();
+        return;
+      }
+
+      const nextIdx = currentState.currentOperationIdx + 1;
+      jumpToOperation(nextIdx);
+
+      const nextState = get(playbackStore);
+      let delay = 1000 / currentState.speed;
+
+      if (nextIdx < currentState.operations.length) {
+        const currentOp = currentState.operations[Math.max(0, nextIdx - 1)];
+        const nextOp = currentState.operations[nextIdx];
+        delay = (nextOp.timeOffset - currentOp.timeOffset) / currentState.speed;
+      }
+
+      playTimer = window.setTimeout(tick, Math.max(10, delay));
+    };
+
+    tick();
+  }
+
+  function pause() {
+    if (playTimer) {
+      clearTimeout(playTimer);
+      playTimer = null;
+    }
+    update((s) => ({ ...s, isPlaying: false }));
+  }
+
+  function stop() {
+    if (playTimer) {
+      clearTimeout(playTimer);
+      playTimer = null;
+    }
+    update((s) => ({ ...s, isPlaying: false }));
+  }
+
+  function stepForward() {
+    const state = get(playbackStore);
+    if (!state.isActive) return;
+    jumpToOperation(state.currentOperationIdx + 1);
+  }
+
+  function stepBackward() {
+    const state = get(playbackStore);
+    if (!state.isActive) return;
+    jumpToOperation(state.currentOperationIdx - 1);
+  }
+
+  function setSpeed(speed: PlaybackSpeed) {
+    update((s) => ({ ...s, speed }));
+  }
+
+  function setOperations(operations: RecordedOperation[]) {
+    update((s) => {
+      const totalDuration = operations.length > 0 ? operations[operations.length - 1].timeOffset : 0;
+      return {
+        ...s,
+        operations,
+        totalOperations: operations.length,
+        totalDuration,
+      };
+    });
+  }
+
+  function setSnapshots(snapshots: MapSnapshot[]) {
+    update((s) => ({ ...s, snapshots }));
+  }
+
+  function setBookmarks(bookmarks: PlaybackBookmark[]) {
+    update((s) => ({ ...s, bookmarks }));
+  }
+
+  function addBookmark(bookmark: PlaybackBookmark) {
+    update((s) => {
+      const bookmarks = [...s.bookmarks, bookmark].sort((a, b) => a.timeOffset - b.timeOffset);
+      return { ...s, bookmarks };
+    });
+  }
+
+  function deleteBookmark(id: string) {
+    update((s) => ({
+      ...s,
+      bookmarks: s.bookmarks.filter((b) => b.id !== id),
+    }));
+  }
+
+  function jumpToTime(timeMs: number) {
+    const state = get(playbackStore);
+    if (!state.isActive) return;
+
+    let targetIdx = 0;
+    for (let i = 0; i < state.operations.length; i++) {
+      if (state.operations[i].timeOffset <= timeMs) {
+        targetIdx = i + 1;
+      } else {
+        break;
+      }
+    }
+
+    jumpToOperation(targetIdx);
+  }
+
+  function startPlayback(recording: RecordingState, originalMapData: MapData) {
+    stop();
+    set({
+      isActive: true,
+      isPlaying: false,
+      currentTime: 0,
+      totalDuration: recording.operationCount > 0 ? recording.operationCount * 100 : 0,
+      currentOperationIdx: 0,
+      totalOperations: recording.operationCount,
+      speed: 1,
+      operations: [],
+      snapshots: [],
+      bookmarks: [],
+      isLoading: true,
+      originalMapData: deepClone(originalMapData),
+    });
+    wsClient.startPlayback();
+    wsClient.requestRecordedOps(0, -1);
+    wsClient.requestSnapshots();
+    wsClient.requestPlaybackBookmarks();
+  }
+
+  function exitPlayback() {
+    stop();
+    const state = get(playbackStore);
+    if (state.originalMapData) {
+      mapStore.setMapData(state.originalMapData);
+    }
+    wsClient.stopPlayback();
+    set(initialPlaybackState);
+  }
+
+  function setLoading(loading: boolean) {
+    update((s) => ({ ...s, isLoading: loading }));
+  }
+
+  return {
+    subscribe,
+    play,
+    pause,
+    stop,
+    stepForward,
+    stepBackward,
+    setSpeed,
+    jumpToOperation,
+    jumpToTime,
+    setOperations,
+    setSnapshots,
+    setBookmarks,
+    addBookmark,
+    deleteBookmark,
+    startPlayback,
+    exitPlayback,
+    setLoading,
+    getMapDataAtOperation,
+  };
+}
+
 export const mapStore = createMapStore();
 export const uiStore = createUIStore();
 export const pathfindingStore = createPathfindingStore();
 export const heatmapStore = createHeatmapStore();
 export const bookmarksStore = createBookmarksStore();
+export const recordingStore = createRecordingStore();
+export const playbackStore = createPlaybackStore();

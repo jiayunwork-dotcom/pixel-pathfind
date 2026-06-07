@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore } from './store';
+  import { onMount, onDestroy, tick } from 'svelte';
+import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore, recordingStore, playbackStore } from './store';
 import { wsClient } from './websocket';
 import JoinRoomModal from './components/JoinRoomModal.svelte';
 import MapCanvas from './components/MapCanvas.svelte';
@@ -11,9 +11,10 @@ import PathfindingPanel from './components/PathfindingPanel.svelte';
 import MapManager from './components/MapManager.svelte';
 import BookmarksPanel from './components/BookmarksPanel.svelte';
 import CompetitionView from './components/CompetitionView.svelte';
+import PlaybackPanel from './components/PlaybackPanel.svelte';
 import { applyOperationToMap } from './drawingTools';
-import type { Operation, User, MapData, CursorUpdate, PathBookmark } from './types';
-import { hasUniformCost } from './utils';
+import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark } from './types';
+import { hasUniformCost, formatTime } from './utils';
 
   let showJoinModal = true;
   let userName = '';
@@ -48,6 +49,9 @@ import { hasUniformCost } from './utils';
         if (data.bookmarks) {
           bookmarksStore.setBookmarks(data.bookmarks);
         }
+        if (data.recording) {
+          recordingStore.updateRecording(data.recording);
+        }
         connected = true;
         showJoinModal = false;
         isJoining = false;
@@ -80,6 +84,37 @@ import { hasUniformCost } from './utils';
       },
       onBookmarkRenamed: (data: { id: string; name: string }) => {
         bookmarksStore.renameBookmark(data.id, data.name);
+      },
+      onRecordingUpdate: (data: { recording: RecordingState }) => {
+        recordingStore.updateRecording(data.recording);
+      },
+      onRecordingStopped: (data: { reason: string; message: string }) => {
+        recordingStore.stopRecording(data.reason);
+        uiStore.showToast(data.message, 5000);
+      },
+      onPlaybackStarted: (data: { recording: RecordingState }) => {
+        playbackStore.setLoading(false);
+      },
+      onPlaybackUserStarted: (data: { userId: string; userName: string; message: string }) => {
+        uiStore.showToast(data.message, 3000);
+      },
+      onPlaybackUserStopped: (data: { userId: string }) => {
+      },
+      onRecordedOps: (data: { operations: RecordedOperation[]; fromIdx: number; toIdx: number }) => {
+        playbackStore.setOperations(data.operations);
+        playbackStore.setLoading(false);
+      },
+      onSnapshots: (data: { snapshots: MapSnapshot[] }) => {
+        playbackStore.setSnapshots(data.snapshots);
+      },
+      onPlaybackBookmarkAdded: (bookmark: PlaybackBookmark) => {
+        playbackStore.addBookmark(bookmark);
+      },
+      onPlaybackBookmarkDeleted: (data: { id: string }) => {
+        playbackStore.deleteBookmark(data.id);
+      },
+      onPlaybackBookmarks: (data: { bookmarks: PlaybackBookmark[] }) => {
+        playbackStore.setBookmarks(data.bookmarks);
       },
     });
   });
@@ -154,6 +189,19 @@ import { hasUniformCost } from './utils';
     pathfindingStore.reset();
     bookmarksStore.reset();
     heatmapStore.reset();
+    recordingStore.reset();
+    playbackStore.exitPlayback();
+  }
+
+  function togglePlayback() {
+    const state = $playbackStore;
+    if (state.isActive) {
+      playbackStore.exitPlayback();
+    } else {
+      const recording = $recordingStore;
+      const mapData = $mapStore.mapData;
+      playbackStore.startPlayback(recording, mapData);
+    }
   }
 
   function copyRoomId() {
@@ -179,6 +227,34 @@ import { hasUniformCost } from './utils';
       </div>
 
       <div class="flex items-center gap-4">
+        {#if $recordingStore.isRecording || $recordingStore.isStopped}
+          <div class="flex items-center gap-3 text-sm px-3 py-1 bg-[#2d2d44] rounded-lg">
+            <span class="flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full {$recordingStore.isStopped ? 'bg-[#95a5a6]' : 'bg-[#e74c3c] pulse-rec'}"></span>
+              <span class="text-muted">录制</span>
+            </span>
+            <span class="font-mono text-[#f39c12]">
+              {formatTime(Date.now() - $recordingStore.startTime)}
+            </span>
+            <span class="text-muted">|</span>
+            <span class="text-[#3498db]">
+              {$recordingStore.operationCount}/{$recordingStore.maxOperations} 操作
+            </span>
+            {#if $recordingStore.isStopped}
+              <span class="text-[#e74c3c] text-xs">已停止</span>
+            {/if}
+          </div>
+        {/if}
+
+        <button
+          on:click={togglePlayback}
+          class="btn text-sm {$playbackStore.isActive ? 'btn-warning' : 'btn-primary'}"
+          disabled={$recordingStore.operationCount === 0}
+          title="回放录制"
+        >
+          {$playbackStore.isActive ? '⏹️ 退出回放' : '▶️ 回放'}
+        </button>
+
         <div class="flex items-center gap-2 text-sm">
           <span class="w-2 h-2 rounded-full {connected ? 'bg-[#2ecc71]' : 'bg-[#e74c3c]'} pulse"></span>
           <span class="text-muted">{connectionStatus === 'connected' ? '已连接' : '已断开'}</span>
@@ -196,13 +272,16 @@ import { hasUniformCost } from './utils';
       {#if competitionMode}
         <CompetitionView />
       {:else}
-        <aside class="left-panel w-64 border-r border-[#2d2d44] overflow-y-auto">
+        <aside class="left-panel w-64 border-r border-[#2d2d44] overflow-y-auto {$playbackStore.isActive ? 'opacity-50 pointer-events-none' : ''}">
           <Toolbar />
           <LayersPanel />
         </aside>
 
         <main class="canvas-container flex-1 relative overflow-hidden bg-[#0d0d1a]">
           <MapCanvas />
+          {#if $playbackStore.isActive}
+            <PlaybackPanel />
+          {/if}
         </main>
 
         <aside class="right-panel w-80 border-l border-[#2d2d44] overflow-y-auto">
@@ -254,6 +333,19 @@ import { hasUniformCost } from './utils';
     to {
       opacity: 1;
       transform: translate(-50%, 0);
+    }
+  }
+
+  .pulse-rec {
+    animation: pulseRec 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulseRec {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
     }
   }
 </style>

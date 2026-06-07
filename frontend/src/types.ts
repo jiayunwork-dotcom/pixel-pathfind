@@ -158,3 +158,66 @@ export interface Message {
 }
 
 export type TemplateType = 'blank' | 'maze' | 'open' | 'city' | 'natural';
+
+export interface RecordedOperation {
+  id: string;
+  userId: string;
+  userName: string;
+  timestamp: number;
+  timeOffset: number;
+  type: string;
+  layer: LayerType;
+  cells: CellOp[];
+  beforeValues: any[];
+  afterValues: any[];
+}
+
+export interface MapSnapshot {
+  id: string;
+  roomId: string;
+  operationIdx: number;
+  timeOffset: number;
+  mapData: MapData;
+  createdAt: number;
+}
+
+export interface PlaybackBookmark {
+  id: string;
+  roomId: string;
+  timeOffset: number;
+  operationIdx: number;
+  note: string;
+  createdBy: string;
+  createdAt: number;
+}
+
+export interface RecordingState {
+  isRecording: boolean;
+  startTime: number;
+  operationCount: number;
+  maxOperations: number;
+  isStopped: boolean;
+}
+
+export interface PlaybackState {
+  userId: string;
+  userName: string;
+  isActive: boolean;
+}
+
+export type PlaybackSpeed = 0.5 | 1 | 2 | 4;
+
+export interface PlaybackControlState {
+  isActive: boolean;
+  isPlaying: boolean;
+  currentTime: number;
+  totalDuration: number;
+  currentOperationIdx: number;
+  totalOperations: number;
+  speed: PlaybackSpeed;
+  operations: RecordedOperation[];
+  snapshots: MapSnapshot[];
+  bookmarks: PlaybackBookmark[];
+  isLoading: boolean;
+  originalMapData: MapData | null;
+}

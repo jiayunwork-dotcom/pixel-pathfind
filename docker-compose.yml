@@ -8,7 +8,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "6399:6379"
     command: redis-server --appendonly yes
 
   backend:
@@ -39,7 +39,7 @@ services:
     container_name: pixel-pathfind-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8888:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./frontend/build:/usr/share/nginx/html

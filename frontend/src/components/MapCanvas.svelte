@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick, afterUpdate } from 'svelte';
-  import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore } from '../store';
+  import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore, playbackStore } from '../store';
   import { wsClient } from '../websocket';
   import {
     getBrushCells,
@@ -47,6 +47,7 @@
   $: isPanning = $uiStore.isPanning;
   $: heatmapState = $heatmapStore;
   $: replayingBookmark = $bookmarksStore.replayingBookmark;
+  $: isPlaybackMode = $playbackStore.isActive;
 
   let cellSize = 16;
   let isRightMouseDown = false;
@@ -512,6 +513,10 @@
     if (e.button !== 0) return;
 
     const cell = screenToWorld(e.clientX, e.clientY);
+
+    if (isPlaybackMode) {
+      return;
+    }
 
     if (replayingBookmark) {
       bookmarksStore.replayBookmark(null);

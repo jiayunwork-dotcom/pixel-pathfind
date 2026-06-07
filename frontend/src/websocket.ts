@@ -1,9 +1,9 @@
-import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark } from './types';
+import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark } from './types';
 
 interface WebSocketCallbacks {
   onConnect?: () => void;
   onDisconnect?: () => void;
-  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[] }) => void;
+  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[]; recording: RecordingState; playbacks: Record<string, PlaybackState> }) => void;
   onUserLeave?: (data: { userId: string; users: Record<string, User> }) => void;
   onCursor?: (cursor: CursorUpdate) => void;
   onOperation?: (op: Operation) => void;
@@ -12,6 +12,16 @@ interface WebSocketCallbacks {
   onBookmarkAdded?: (bookmark: PathBookmark) => void;
   onBookmarkDeleted?: (data: { id: string }) => void;
   onBookmarkRenamed?: (data: { id: string; name: string }) => void;
+  onRecordingUpdate?: (data: { recording: RecordingState }) => void;
+  onRecordingStopped?: (data: { reason: string; message: string }) => void;
+  onPlaybackStarted?: (data: { recording: RecordingState }) => void;
+  onPlaybackUserStarted?: (data: { userId: string; userName: string; message: string }) => void;
+  onPlaybackUserStopped?: (data: { userId: string }) => void;
+  onRecordedOps?: (data: { operations: RecordedOperation[]; fromIdx: number; toIdx: number }) => void;
+  onSnapshots?: (data: { snapshots: MapSnapshot[] }) => void;
+  onPlaybackBookmarkAdded?: (bookmark: PlaybackBookmark) => void;
+  onPlaybackBookmarkDeleted?: (data: { id: string }) => void;
+  onPlaybackBookmarks?: (data: { bookmarks: PlaybackBookmark[] }) => void;
 }
 
 export class WebSocketClient {
@@ -120,6 +130,36 @@ export class WebSocketClient {
         break;
       case 'bookmark-renamed':
         this.callbacks.onBookmarkRenamed?.(message.payload);
+        break;
+      case 'recording-update':
+        this.callbacks.onRecordingUpdate?.(message.payload);
+        break;
+      case 'recording-stopped':
+        this.callbacks.onRecordingStopped?.(message.payload);
+        break;
+      case 'playback-started':
+        this.callbacks.onPlaybackStarted?.(message.payload);
+        break;
+      case 'playback-user-started':
+        this.callbacks.onPlaybackUserStarted?.(message.payload);
+        break;
+      case 'playback-user-stopped':
+        this.callbacks.onPlaybackUserStopped?.(message.payload);
+        break;
+      case 'recorded-ops':
+        this.callbacks.onRecordedOps?.(message.payload);
+        break;
+      case 'snapshots':
+        this.callbacks.onSnapshots?.(message.payload);
+        break;
+      case 'playback-bookmark-added':
+        this.callbacks.onPlaybackBookmarkAdded?.(message.payload);
+        break;
+      case 'playback-bookmark-deleted':
+        this.callbacks.onPlaybackBookmarkDeleted?.(message.payload);
+        break;
+      case 'playback-bookmarks':
+        this.callbacks.onPlaybackBookmarks?.(message.payload);
         break;
     }
   }
@@ -240,6 +280,97 @@ export class WebSocketClient {
 
   getLastOperationTimestamp(): number {
     return this.lastOperationTimestamp;
+  }
+
+  startPlayback() {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'playback-start',
+      payload: {},
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to start playback:', e);
+    }
+  }
+
+  stopPlayback() {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'playback-stop',
+      payload: {},
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to stop playback:', e);
+    }
+  }
+
+  requestRecordedOps(fromIdx: number = 0, toIdx: number = -1) {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'request-recorded-ops',
+      payload: { fromIdx, toIdx },
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to request recorded ops:', e);
+    }
+  }
+
+  requestSnapshots() {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'request-snapshots',
+      payload: {},
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to request snapshots:', e);
+    }
+  }
+
+  addPlaybackBookmark(timeOffset: number, operationIdx: number, note: string) {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'playback-bookmark-add',
+      payload: { timeOffset, operationIdx, note },
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to add playback bookmark:', e);
+    }
+  }
+
+  deletePlaybackBookmark(id: string) {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'playback-bookmark-delete',
+      payload: { id },
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to delete playback bookmark:', e);
+    }
+  }
+
+  requestPlaybackBookmarks() {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'request-playback-bookmarks',
+      payload: {},
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to request playback bookmarks:', e);
+    }
   }
 }
 
