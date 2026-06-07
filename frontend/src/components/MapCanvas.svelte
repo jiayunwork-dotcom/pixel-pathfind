@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick, afterUpdate } from 'svelte';
-  import { mapStore, uiStore, pathfindingStore } from '../store';
+  import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore } from '../store';
   import { wsClient } from '../websocket';
   import {
     getBrushCells,
@@ -45,6 +45,8 @@
   $: results = $pathfindingStore.results;
   $: layers = $mapStore.mapData.layers;
   $: isPanning = $uiStore.isPanning;
+  $: heatmapState = $heatmapStore;
+  $: replayingBookmark = $bookmarksStore.replayingBookmark;
 
   let cellSize = 16;
   let isRightMouseDown = false;
@@ -52,6 +54,19 @@
   let lastMouseY = 0;
   let isDragging = false;
   let previewCells: Cell[] = [];
+
+  function getHeatColor(value: number): string {
+    value = Math.max(0, Math.min(1, value));
+    const r: number[] = [0, 0, 255, 255];
+    const g: number[] = [0, 255, 255, 0];
+    const b: number[] = [255, 255, 0, 0];
+    const idx = Math.floor(value * 3);
+    const t = (value * 3) - idx;
+    const ri = Math.round(r[idx] + (r[idx + 1] - r[idx]) * t);
+    const gi = Math.round(g[idx] + (g[idx + 1] - g[idx]) * t);
+    const bi = Math.round(b[idx] + (b[idx + 1] - b[idx]) * t);
+    return `rgb(${ri}, ${gi}, ${bi})`;
+  }
 
   function resizeCanvas() {
     if (!container || !canvas) return;
@@ -156,6 +171,85 @@
     }
 
     ctx.globalAlpha = 1;
+
+    if (heatmapState.visible && heatmapState.heatData.size > 0 && heatmapState.maxHeat > 0) {
+      for (let y = viewStartY; y < viewEndY; y++) {
+        for (let x = viewStartX; x < viewEndX; x++) {
+          const key = cellKey(x, y);
+          const heat = heatmapState.heatData.get(key) || 0;
+          if (heat > 0) {
+            const normalizedHeat = heat / heatmapState.maxHeat;
+            const color = getHeatColor(normalizedHeat);
+            const screen = worldToScreen(x, y);
+            ctx.globalAlpha = heatmapState.opacity;
+            ctx.fillStyle = color;
+            ctx.fillRect(screen.x, screen.y, scaledCellSize + 1, scaledCellSize + 1);
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (replayingBookmark) {
+      const bookmarkPath = replayingBookmark.path;
+      if (bookmarkPath.length > 0) {
+        ctx.strokeStyle = '#9b59b6';
+        ctx.lineWidth = Math.max(3, scaledCellSize * 0.4);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+
+        for (let i = 0; i < bookmarkPath.length; i++) {
+          const p = bookmarkPath[i];
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          if (i === 0) {
+            ctx.moveTo(screen.x, screen.y);
+          } else {
+            ctx.lineTo(screen.x, screen.y);
+          }
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (bookmarkPath.length > 1) {
+          ctx.strokeStyle = 'rgba(155, 89, 182, 0.3)';
+          ctx.lineWidth = Math.max(5, scaledCellSize * 0.6);
+          ctx.stroke();
+        }
+      }
+
+      const startP = replayingBookmark.startPoint;
+      const endP = replayingBookmark.endPoint;
+      
+      const startScreen = worldToScreen(startP.x + 0.5, startP.y + 0.5);
+      const startRadius = scaledCellSize * 0.7;
+      ctx.fillStyle = '#27ae60';
+      ctx.beginPath();
+      ctx.moveTo(startScreen.x - startRadius * 0.3, startScreen.y + startRadius * 0.6);
+      ctx.lineTo(startScreen.x - startRadius * 0.3, startScreen.y - startRadius * 0.6);
+      ctx.lineTo(startScreen.x + startRadius * 0.5, startScreen.y - startRadius * 0.2);
+      ctx.lineTo(startScreen.x - startRadius * 0.3, startScreen.y + startRadius * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#27ae60';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      const endScreen = worldToScreen(endP.x + 0.5, endP.y + 0.5);
+      const endRadius = scaledCellSize * 0.7;
+      ctx.fillStyle = '#e74c3c';
+      ctx.beginPath();
+      ctx.moveTo(endScreen.x - endRadius * 0.3, endScreen.y + endRadius * 0.6);
+      ctx.lineTo(endScreen.x - endRadius * 0.3, endScreen.y - endRadius * 0.6);
+      ctx.lineTo(endScreen.x + endRadius * 0.5, endScreen.y - endRadius * 0.2);
+      ctx.lineTo(endScreen.x - endRadius * 0.3, endScreen.y + endRadius * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#e74c3c';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
 
     if (searchState) {
       searchState.visited.forEach((key) => {
@@ -416,9 +510,21 @@
     }
 
     if (e.button !== 0) return;
-    if (layers[currentLayer].locked) return;
 
     const cell = screenToWorld(e.clientX, e.clientY);
+
+    if (replayingBookmark) {
+      bookmarksStore.replayBookmark(null);
+      bookmarksStore.selectBookmark(null);
+      pathfindingStore.setStartPoint(null);
+      pathfindingStore.setEndPoint(null);
+      pathfindingStore.clearPath();
+      render();
+      return;
+    }
+
+    if (layers[currentLayer].locked) return;
+
     if (cell.x < 0 || cell.x >= mapData.width || cell.y < 0 || cell.y >= mapData.height) return;
 
     if ($pathfindingStore.isRunning) return;

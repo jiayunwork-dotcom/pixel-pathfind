@@ -1,18 +1,19 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { mapStore, uiStore, pathfindingStore } from './store';
-  import { wsClient } from './websocket';
-  import JoinRoomModal from './components/JoinRoomModal.svelte';
-  import MapCanvas from './components/MapCanvas.svelte';
-  import Toolbar from './components/Toolbar.svelte';
-  import LayersPanel from './components/LayersPanel.svelte';
-  import UsersPanel from './components/UsersPanel.svelte';
-  import PathfindingPanel from './components/PathfindingPanel.svelte';
-  import MapManager from './components/MapManager.svelte';
-  import CompetitionView from './components/CompetitionView.svelte';
-  import { applyOperationToMap } from './drawingTools';
-  import type { Operation, User, MapData, CursorUpdate } from './types';
-  import { hasUniformCost } from './utils';
+import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore } from './store';
+import { wsClient } from './websocket';
+import JoinRoomModal from './components/JoinRoomModal.svelte';
+import MapCanvas from './components/MapCanvas.svelte';
+import Toolbar from './components/Toolbar.svelte';
+import LayersPanel from './components/LayersPanel.svelte';
+import UsersPanel from './components/UsersPanel.svelte';
+import PathfindingPanel from './components/PathfindingPanel.svelte';
+import MapManager from './components/MapManager.svelte';
+import BookmarksPanel from './components/BookmarksPanel.svelte';
+import CompetitionView from './components/CompetitionView.svelte';
+import { applyOperationToMap } from './drawingTools';
+import type { Operation, User, MapData, CursorUpdate, PathBookmark } from './types';
+import { hasUniformCost } from './utils';
 
   let showJoinModal = true;
   let userName = '';
@@ -44,6 +45,9 @@
         mapStore.setMapData(data.mapData);
         mapStore.setCurrentUserId(data.yourId);
         uiStore.setUsers(data.users);
+        if (data.bookmarks) {
+          bookmarksStore.setBookmarks(data.bookmarks);
+        }
         connected = true;
         showJoinModal = false;
         isJoining = false;
@@ -67,6 +71,15 @@
       onError: (error) => {
         errorMessage = error;
         isJoining = false;
+      },
+      onBookmarkAdded: (bookmark: PathBookmark) => {
+        bookmarksStore.addBookmark(bookmark);
+      },
+      onBookmarkDeleted: (data: { id: string }) => {
+        bookmarksStore.deleteBookmark(data.id);
+      },
+      onBookmarkRenamed: (data: { id: string; name: string }) => {
+        bookmarksStore.renameBookmark(data.id, data.name);
       },
     });
   });
@@ -139,6 +152,8 @@
     mapStore.reset();
     uiStore.reset();
     pathfindingStore.reset();
+    bookmarksStore.reset();
+    heatmapStore.reset();
   }
 
   function copyRoomId() {
@@ -193,6 +208,7 @@
         <aside class="right-panel w-80 border-l border-[#2d2d44] overflow-y-auto">
           <UsersPanel />
           <PathfindingPanel />
+          <BookmarksPanel />
           <MapManager />
         </aside>
       {/if}

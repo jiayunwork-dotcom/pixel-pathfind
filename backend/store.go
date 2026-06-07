@@ -91,6 +91,7 @@ func (s *Store) DeleteRoom(roomID string) error {
 	pipe := s.rdb.TxPipeline()
 	pipe.Del(ctx, fmt.Sprintf("room:%s", roomID))
 	pipe.Del(ctx, fmt.Sprintf("room:%s:ops", roomID))
+	pipe.Del(ctx, fmt.Sprintf("room:%s:bookmarks", roomID))
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -102,4 +103,32 @@ func (s *Store) RoomExists(roomID string) (bool, error) {
 		return false, err
 	}
 	return exists > 0, nil
+}
+
+func (s *Store) SaveBookmarks(roomID string, bookmarks []PathBookmark) error {
+	data, err := json.Marshal(bookmarks)
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("room:%s:bookmarks", roomID)
+	return s.rdb.Set(ctx, key, data, 24*time.Hour).Err()
+}
+
+func (s *Store) LoadBookmarks(roomID string) ([]PathBookmark, error) {
+	key := fmt.Sprintf("room:%s:bookmarks", roomID)
+	data, err := s.rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return []PathBookmark{}, nil
+		}
+		return nil, err
+	}
+
+	var bookmarks []PathBookmark
+	if err := json.Unmarshal([]byte(data), &bookmarks); err != nil {
+		return nil, err
+	}
+
+	return bookmarks, nil
 }

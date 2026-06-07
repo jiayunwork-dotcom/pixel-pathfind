@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { pathfindingStore, mapStore, uiStore } from '../store';
+  import { pathfindingStore, mapStore, uiStore, bookmarksStore } from '../store';
+  import { wsClient } from '../websocket';
   import { hasUniformCost } from '../utils';
   import {
     bfs,
@@ -15,6 +16,7 @@
     Cell,
     AlgorithmResult,
     SearchState,
+    PathBookmark,
   } from '../types';
 
   let animationFrameId: number | null = null;
@@ -252,6 +254,38 @@
     }
     pathfindingStore.clearCompetitionResults();
   }
+
+  function saveBookmark() {
+    if (!results || !startPoint || !endPoint) {
+      uiStore.showToast('请先运行寻路算法');
+      return;
+    }
+
+    if (results.path.length === 0) {
+      uiStore.showToast('未找到路径，无法保存');
+      return;
+    }
+
+    const bookmarkName = prompt('请输入书签名称:', `路径 ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`);
+    if (!bookmarkName || !bookmarkName.trim()) {
+      return;
+    }
+
+    const bookmark: Omit<PathBookmark, 'id' | 'createdBy' | 'createdByName' | 'createdAt'> = {
+      name: bookmarkName.trim(),
+      algorithm: selectedAlgorithm,
+      startPoint,
+      endPoint,
+      path: results.path,
+      exploredCount: results.exploredCount,
+      totalCost: results.totalCost,
+      pathLength: results.pathLength,
+      timeMs: results.timeMs,
+    };
+
+    wsClient.addBookmark(bookmark);
+    uiStore.showToast('书签已保存');
+  }
 </script>
 
 <div class="panel p-4 mb-4">
@@ -422,7 +456,17 @@
 
     {#if results}
       <div class="bg-[#0d0d1a] rounded-lg p-3">
-        <h4 class="text-sm font-semibold mb-2 text-[#4a9eff]">运行结果</h4>
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-sm font-semibold text-[#4a9eff]">运行结果</h4>
+          <button
+            on:click={saveBookmark}
+            class="text-xs px-2 py-1 rounded bg-[#9b59b6] hover:bg-[#8e44ad] text-white disabled:opacity-50"
+            disabled={results.path.length === 0 || isRunning}
+            title="保存路径书签"
+          >
+            💾 保存书签
+          </button>
+        </div>
         <div class="grid grid-cols-2 gap-2 text-xs">
           <div class="stat-item">
             <span class="text-muted">探索节点</span>

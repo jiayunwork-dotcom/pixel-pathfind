@@ -11,7 +11,10 @@ import type {
   HeuristicType,
   AlgorithmResult,
   SearchState,
+  PathBookmark,
+  HeatmapState,
 } from './types';
+import { cellKey } from './utils';
 import { createEmptyMap } from './mapTemplates';
 import { applyOperationToMap, inverseOperation } from './drawingTools';
 import { wsClient } from './websocket';
@@ -380,6 +383,118 @@ function createPathfindingStore() {
   };
 }
 
+interface BookmarksState {
+  bookmarks: PathBookmark[];
+  selectedBookmarkId: string | null;
+  replayingBookmark: PathBookmark | null;
+}
+
+const initialBookmarksState: BookmarksState = {
+  bookmarks: [],
+  selectedBookmarkId: null,
+  replayingBookmark: null,
+};
+
+function createBookmarksStore() {
+  const { subscribe, set, update } = writable<BookmarksState>(initialBookmarksState);
+
+  function calculateHeatmap(bookmarks: PathBookmark[]): { heatData: Map<string, number>; maxHeat: number } {
+    const heatData = new Map<string, number>();
+    let maxHeat = 0;
+
+    for (const bookmark of bookmarks) {
+      for (const cell of bookmark.path) {
+        const key = cellKey(cell.x, cell.y);
+        const count = (heatData.get(key) || 0) + 1;
+        heatData.set(key, count);
+        if (count > maxHeat) maxHeat = count;
+      }
+    }
+
+    return { heatData, maxHeat };
+  }
+
+  return {
+    subscribe,
+
+    setBookmarks: (bookmarks: PathBookmark[]) => {
+      update((state) => {
+        const { heatData, maxHeat } = calculateHeatmap(bookmarks);
+        heatmapStore.setHeatData(heatData, maxHeat);
+        return { ...state, bookmarks };
+      });
+    },
+
+    addBookmark: (bookmark: PathBookmark) =>
+      update((state) => {
+        const bookmarks = [...state.bookmarks, bookmark];
+        if (bookmarks.length > 20) {
+          bookmarks.splice(0, bookmarks.length - 20);
+        }
+        const { heatData, maxHeat } = calculateHeatmap(bookmarks);
+        heatmapStore.setHeatData(heatData, maxHeat);
+        return { ...state, bookmarks };
+      }),
+
+    deleteBookmark: (id: string) =>
+      update((state) => {
+        const bookmarks = state.bookmarks.filter((b) => b.id !== id);
+        const { heatData, maxHeat } = calculateHeatmap(bookmarks);
+        heatmapStore.setHeatData(heatData, maxHeat);
+        const replayingBookmark = state.replayingBookmark?.id === id ? null : state.replayingBookmark;
+        return { ...state, bookmarks, replayingBookmark, selectedBookmarkId: state.selectedBookmarkId === id ? null : state.selectedBookmarkId };
+      }),
+
+    renameBookmark: (id: string, name: string) =>
+      update((state) => {
+        const bookmarks = state.bookmarks.map((b) => (b.id === id ? { ...b, name } : b));
+        const replayingBookmark = state.replayingBookmark?.id === id ? { ...state.replayingBookmark, name } : state.replayingBookmark;
+        return { ...state, bookmarks, replayingBookmark };
+      }),
+
+    selectBookmark: (id: string | null) =>
+      update((state) => ({ ...state, selectedBookmarkId: id })),
+
+    replayBookmark: (bookmark: PathBookmark | null) =>
+      update((state) => ({ ...state, replayingBookmark: bookmark })),
+
+    reset: () => {
+      heatmapStore.setHeatData(new Map(), 0);
+      set(initialBookmarksState);
+    },
+  };
+}
+
+function createHeatmapStore() {
+  const { subscribe, set, update } = writable<HeatmapState>({
+    visible: false,
+    opacity: 0.5,
+    heatData: new Map(),
+    maxHeat: 0,
+  });
+
+  return {
+    subscribe,
+
+    setVisible: (visible: boolean) => update((state) => ({ ...state, visible })),
+
+    setOpacity: (opacity: number) => update((state) => ({ ...state, opacity: Math.max(0, Math.min(0.8, opacity)) })),
+
+    setHeatData: (heatData: Map<string, number>, maxHeat: number) =>
+      update((state) => ({ ...state, heatData, maxHeat })),
+
+    reset: () =>
+      set({
+        visible: false,
+        opacity: 0.5,
+        heatData: new Map(),
+        maxHeat: 0,
+      }),
+  };
+}
+
 export const mapStore = createMapStore();
 export const uiStore = createUIStore();
 export const pathfindingStore = createPathfindingStore();
+export const heatmapStore = createHeatmapStore();
+export const bookmarksStore = createBookmarksStore();

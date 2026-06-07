@@ -75,6 +75,7 @@ func (rm *RoomManager) CreateRoom() string {
 				},
 			},
 			Users:     make(map[string]*User),
+			Bookmarks: []PathBookmark{},
 			CreatedAt: time.Now(),
 		},
 		clients: make(map[string]*websocket.Conn),
@@ -97,6 +98,12 @@ func (rm *RoomManager) GetRoom(roomID string) (*Room, bool) {
 		if exists {
 			state, err := rm.store.LoadRoom(roomID)
 			if err == nil {
+				bookmarks, err := rm.store.LoadBookmarks(roomID)
+				if err == nil {
+					state.Bookmarks = bookmarks
+				} else {
+					state.Bookmarks = []PathBookmark{}
+				}
 				room = &Room{
 					ID:      roomID,
 					state:   state,
@@ -137,11 +144,12 @@ func (rm *RoomManager) JoinRoom(roomID, userName string, conn *websocket.Conn) (
 	joinMsg := Message{
 		Type: "user-join",
 		Payload: map[string]interface{}{
-			"user":     user,
-			"users":    room.state.Users,
-			"roomId":   roomID,
-			"mapData":  room.state.MapData,
-			"yourId":   userID,
+			"user":      user,
+			"users":     room.state.Users,
+			"roomId":    roomID,
+			"mapData":   room.state.MapData,
+			"yourId":    userID,
+			"bookmarks": room.state.Bookmarks,
 		},
 	}
 
@@ -243,6 +251,76 @@ func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMess
 			data, _ := json.Marshal(syncMsg)
 			conn.WriteMessage(websocket.TextMessage, data)
 		}
+
+	case "bookmark-add":
+		var bookmark PathBookmark
+		if err := json.Unmarshal(payload, &bookmark); err != nil {
+			return
+		}
+
+		bookmark.ID = uuid.New().String()
+		bookmark.CreatedBy = userID
+		if user, exists := r.state.Users[userID]; exists {
+			bookmark.CreatedByName = user.Name
+		}
+		bookmark.CreatedAt = time.Now().UnixNano() / int64(time.Millisecond)
+
+		r.state.Bookmarks = append(r.state.Bookmarks, bookmark)
+		if len(r.state.Bookmarks) > 20 {
+			r.state.Bookmarks = r.state.Bookmarks[len(r.state.Bookmarks)-20:]
+		}
+
+		r.store.SaveBookmarks(r.ID, r.state.Bookmarks)
+
+		r.broadcast(Message{
+			Type:    "bookmark-added",
+			Payload: bookmark,
+		}, "")
+
+	case "bookmark-delete":
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		for i, b := range r.state.Bookmarks {
+			if b.ID == req.ID {
+				r.state.Bookmarks = append(r.state.Bookmarks[:i], r.state.Bookmarks[i+1:]...)
+				break
+			}
+		}
+
+		r.store.SaveBookmarks(r.ID, r.state.Bookmarks)
+
+		r.broadcast(Message{
+			Type:    "bookmark-deleted",
+			Payload: map[string]string{"id": req.ID},
+		}, "")
+
+	case "bookmark-rename":
+		var req struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		for i := range r.state.Bookmarks {
+			if r.state.Bookmarks[i].ID == req.ID {
+				r.state.Bookmarks[i].Name = req.Name
+				break
+			}
+		}
+
+		r.store.SaveBookmarks(r.ID, r.state.Bookmarks)
+
+		r.broadcast(Message{
+			Type:    "bookmark-renamed",
+			Payload: req,
+		}, "")
 	}
 }
 

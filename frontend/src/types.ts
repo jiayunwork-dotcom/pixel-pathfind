@@ -129,6 +129,29 @@ export interface RoomState {
   users: Record<string, User>;
 }
 
+export interface PathBookmark {
+  id: string;
+  name: string;
+  algorithm: AlgorithmType;
+  startPoint: Cell;
+  endPoint: Cell;
+  path: Cell[];
+  exploredCount: number;
+  totalCost: number;
+  pathLength: number;
+  timeMs: number;
+  createdBy: string;
+  createdByName: string;
+  createdAt: number;
+}
+
+export interface HeatmapState {
+  visible: boolean;
+  opacity: number;
+  heatData: Map<string, number>;
+  maxHeat: number;
+}
+
 export interface Message {
   type: string;
   payload: any;

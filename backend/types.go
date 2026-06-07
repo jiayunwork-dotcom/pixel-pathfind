@@ -81,10 +81,27 @@ type CursorUpdate struct {
 	Y      int    `json:"y"`
 }
 
+type PathBookmark struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Algorithm      string    `json:"algorithm"`
+	StartPoint     Cell      `json:"startPoint"`
+	EndPoint       Cell      `json:"endPoint"`
+	Path           []Cell    `json:"path"`
+	ExploredCount  int       `json:"exploredCount"`
+	TotalCost      float64   `json:"totalCost"`
+	PathLength     int       `json:"pathLength"`
+	TimeMs         int64     `json:"timeMs"`
+	CreatedBy      string    `json:"createdBy"`
+	CreatedByName  string    `json:"createdByName"`
+	CreatedAt      int64     `json:"createdAt"`
+}
+
 type RoomState struct {
 	ID         string                `json:"id"`
 	MapData    MapData               `json:"mapData"`
 	Users      map[string]*User      `json:"users"`
 	Operations []Operation           `json:"operations"`
+	Bookmarks  []PathBookmark        `json:"bookmarks"`
 	CreatedAt  time.Time             `json:"createdAt"`
 }

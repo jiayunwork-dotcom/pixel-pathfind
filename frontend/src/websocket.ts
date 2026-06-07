@@ -1,14 +1,17 @@
-import type { Message, Operation, CursorUpdate, User, MapData } from './types';
+import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark } from './types';
 
 interface WebSocketCallbacks {
   onConnect?: () => void;
   onDisconnect?: () => void;
-  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string }) => void;
+  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[] }) => void;
   onUserLeave?: (data: { userId: string; users: Record<string, User> }) => void;
   onCursor?: (cursor: CursorUpdate) => void;
   onOperation?: (op: Operation) => void;
   onSync?: (data: { operations: Operation[]; mapData: MapData }) => void;
   onError?: (error: string) => void;
+  onBookmarkAdded?: (bookmark: PathBookmark) => void;
+  onBookmarkDeleted?: (data: { id: string }) => void;
+  onBookmarkRenamed?: (data: { id: string; name: string }) => void;
 }
 
 export class WebSocketClient {
@@ -109,6 +112,15 @@ export class WebSocketClient {
       case 'error':
         this.callbacks.onError?.(message.payload);
         break;
+      case 'bookmark-added':
+        this.callbacks.onBookmarkAdded?.(message.payload);
+        break;
+      case 'bookmark-deleted':
+        this.callbacks.onBookmarkDeleted?.(message.payload);
+        break;
+      case 'bookmark-renamed':
+        this.callbacks.onBookmarkRenamed?.(message.payload);
+        break;
     }
   }
 
@@ -161,6 +173,51 @@ export class WebSocketClient {
       this.ws.send(JSON.stringify(message));
     } catch (e) {
       console.error('Failed to request sync:', e);
+    }
+  }
+
+  addBookmark(bookmark: Omit<PathBookmark, 'id' | 'createdBy' | 'createdByName' | 'createdAt'>) {
+    if (!this.isConnected || !this.ws) return;
+
+    const message = {
+      type: 'bookmark-add',
+      payload: bookmark,
+    };
+
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to add bookmark:', e);
+    }
+  }
+
+  deleteBookmark(id: string) {
+    if (!this.isConnected || !this.ws) return;
+
+    const message = {
+      type: 'bookmark-delete',
+      payload: { id },
+    };
+
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to delete bookmark:', e);
+    }
+  }
+
+  renameBookmark(id: string, name: string) {
+    if (!this.isConnected || !this.ws) return;
+
+    const message = {
+      type: 'bookmark-rename',
+      payload: { id, name },
+    };
+
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to rename bookmark:', e);
     }
   }
 

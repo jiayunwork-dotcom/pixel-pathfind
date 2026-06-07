@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { mapStore } from '../store';
+  import { mapStore, heatmapStore, bookmarksStore } from '../store';
   import { LayerType } from '../types';
 
   const layers = [
@@ -10,6 +10,18 @@
   ];
 
   $: mapLayers = $mapStore.mapData.layers;
+  $: heatmapVisible = $heatmapStore.visible;
+  $: heatmapOpacity = $heatmapStore.opacity;
+  $: bookmarksCount = $bookmarksStore.bookmarks.length;
+
+  function toggleHeatmap() {
+    heatmapStore.setVisible(!heatmapVisible);
+  }
+
+  function handleHeatmapOpacityInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    heatmapStore.setOpacity(Number(target.value) / 100);
+  }
 
   function toggleVisibility(layer: LayerType) {
     const info = mapLayers[layer];
@@ -79,6 +91,47 @@
       </div>
     {/each}
 
+    <div class="layer-item flex items-center gap-2 py-2 border-b border-[#2d2d44]">
+      <button
+        class="visibility-btn p-1 rounded hover:bg-[#3d3d5c] text-lg"
+        on:click={toggleHeatmap}
+        title={heatmapVisible ? '隐藏' : '显示'}
+      >
+        {heatmapVisible ? '👁️' : '👁️‍🗨️'}
+      </button>
+
+      <span class="text-lg">🔥</span>
+
+      <div class="flex-1">
+        <div class="text-sm font-medium">热力图</div>
+        <div class="text-xs text-[#8892b0]">
+          {bookmarksCount > 0 ? `基于 ${bookmarksCount} 条路径` : '无数据'}
+        </div>
+      </div>
+
+      <div class="flex flex-col items-center gap-1">
+        <input
+          type="range"
+          min="0"
+          max="80"
+          value={heatmapOpacity * 100}
+          on:input={handleHeatmapOpacityInput}
+          class="w-20"
+          disabled={bookmarksCount === 0}
+        />
+        <span class="text-xs text-[#8892b0]">
+          {Math.round(heatmapOpacity * 100)}%
+        </span>
+      </div>
+    </div>
+
+    <div class="mt-2 p-2 rounded-lg" style="background: linear-gradient(to right, rgb(0,0,255), rgb(0,255,255), rgb(255,255,0), rgb(255,0,0));">
+      <div class="flex justify-between text-[10px] text-white font-bold px-1">
+        <span>冷</span>
+        <span>热</span>
+      </div>
+    </div>
+
     <div class="mt-4 p-3 bg-[#2d2d44]/50 rounded-lg">
       <div class="text-xs text-[#8892b0] mb-2">说明</div>
       <div class="text-xs text-muted space-y-1">
@@ -86,6 +139,8 @@
         <div>• 装饰层和事件层仅用于视觉效果</div>
         <div>• 锁定图层后无法进行编辑</div>
         <div>• 调节透明度可叠加查看多层</div>
+        <div>• 热力图基于保存的路径书签统计</div>
+        <div>• 颜色越暖表示该格子被经过次数越多</div>
       </div>
     </div>
   </div>
