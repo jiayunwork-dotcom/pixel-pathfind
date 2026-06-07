@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore, recordingStore, playbackStore } from './store';
+import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore, recordingStore, playbackStore, customAlgorithmStore } from './store';
 import { wsClient } from './websocket';
 import JoinRoomModal from './components/JoinRoomModal.svelte';
 import MapCanvas from './components/MapCanvas.svelte';
@@ -12,8 +12,9 @@ import MapManager from './components/MapManager.svelte';
 import BookmarksPanel from './components/BookmarksPanel.svelte';
 import CompetitionView from './components/CompetitionView.svelte';
 import PlaybackPanel from './components/PlaybackPanel.svelte';
+import CustomAlgorithmPanel from './components/CustomAlgorithmPanel.svelte';
 import { applyOperationToMap } from './drawingTools';
-import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment } from './types';
+import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment, CustomAlgorithm } from './types';
 import { hasUniformCost, formatTime } from './utils';
 
   let showJoinModal = true;
@@ -58,6 +59,9 @@ import { hasUniformCost, formatTime } from './utils';
         if (data.recording) {
           recordingStore.updateRecording(data.recording);
         }
+        customAlgorithmStore.setUserInfo(data.yourId, data.users[data.yourId]?.name || userName);
+        customAlgorithmStore.setRoomId(roomId);
+        customAlgorithmStore.loadAlgorithms();
         connected = true;
         showJoinModal = false;
         isJoining = false;
@@ -127,6 +131,12 @@ import { hasUniformCost, formatTime } from './utils';
       },
       onPlaybackBookmarks: (data: { bookmarks: PlaybackBookmark[] }) => {
         playbackStore.setBookmarks(data.bookmarks);
+      },
+      onAlgorithmUpdated: (algorithm: CustomAlgorithm) => {
+        customAlgorithmStore.addAlgorithm(algorithm);
+      },
+      onAlgorithmDeleted: (data: { id: string }) => {
+        customAlgorithmStore.deleteAlgorithm(data.id);
       },
     });
   });
@@ -203,6 +213,7 @@ import { hasUniformCost, formatTime } from './utils';
     heatmapStore.reset();
     recordingStore.reset();
     playbackStore.exitPlayback();
+    customAlgorithmStore.reset();
   }
 
   function togglePlayback() {
@@ -306,6 +317,7 @@ import { hasUniformCost, formatTime } from './utils';
           <div class={isComparing ? 'panel-disabled' : ''}>
             <PathfindingPanel />
           </div>
+          <CustomAlgorithmPanel />
           <BookmarksPanel />
           <div class={isComparing ? 'panel-disabled' : ''}>
             <MapManager />

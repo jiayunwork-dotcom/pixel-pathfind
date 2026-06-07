@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick, afterUpdate } from 'svelte';
-  import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore, playbackStore } from '../store';
+  import { mapStore, uiStore, pathfindingStore, bookmarksStore, heatmapStore, playbackStore, customAlgorithmStore } from '../store';
   import { wsClient } from '../websocket';
   import {
     getBrushCells,
@@ -51,6 +51,10 @@
   $: compareMode = $bookmarksStore.compareMode;
   $: comparingPaths = compareMode.comparingPaths;
   $: isCompareMode = compareMode.isActive;
+  $: customAlgoState = $customAlgorithmStore;
+  $: compareResult = customAlgoState.compareResult;
+  $: showCustomPath = customAlgoState.showCustomPath;
+  $: showBFSPath = customAlgoState.showBFSPath;
 
   let cellSize = 16;
   let tooltipPaths: ComparePathInfo[] = [];
@@ -378,6 +382,80 @@
         ctx.strokeStyle = 'rgba(231, 76, 60, 0.3)';
         ctx.lineWidth = Math.max(4, scaledCellSize * 0.5);
         ctx.stroke();
+      }
+    }
+
+    if (compareResult) {
+      if (showBFSPath && compareResult.bfsResult.pathLength > 0) {
+        const bfsPath = compareResult.bfsResult.path;
+        ctx.strokeStyle = '#3498db';
+        ctx.lineWidth = Math.max(3, scaledCellSize * 0.35);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+
+        for (let i = 0; i < bfsPath.length; i++) {
+          const p = bfsPath[i];
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          if (i === 0) {
+            ctx.moveTo(screen.x, screen.y);
+          } else {
+            ctx.lineTo(screen.x, screen.y);
+          }
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (bfsPath.length > 1) {
+          ctx.strokeStyle = 'rgba(52, 152, 219, 0.25)';
+          ctx.lineWidth = Math.max(5, scaledCellSize * 0.55);
+          ctx.stroke();
+        }
+
+        for (const p of bfsPath) {
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          const radius = scaledCellSize * 0.15;
+          ctx.fillStyle = '#3498db';
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      if (showCustomPath && compareResult.customResult.pathLength > 0 && !compareResult.customResult.error) {
+        const customPath = compareResult.customResult.path;
+        ctx.strokeStyle = '#9b59b6';
+        ctx.lineWidth = Math.max(3, scaledCellSize * 0.4);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+
+        for (let i = 0; i < customPath.length; i++) {
+          const p = customPath[i];
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          if (i === 0) {
+            ctx.moveTo(screen.x, screen.y);
+          } else {
+            ctx.lineTo(screen.x, screen.y);
+          }
+        }
+        ctx.stroke();
+
+        if (customPath.length > 1) {
+          ctx.strokeStyle = 'rgba(155, 89, 182, 0.3)';
+          ctx.lineWidth = Math.max(5, scaledCellSize * 0.6);
+          ctx.stroke();
+        }
+
+        for (const p of customPath) {
+          const screen = worldToScreen(p.x + 0.5, p.y + 0.5);
+          const radius = scaledCellSize * 0.18;
+          ctx.fillStyle = '#9b59b6';
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 

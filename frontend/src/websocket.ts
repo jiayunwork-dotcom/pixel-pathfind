@@ -1,4 +1,4 @@
-import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment } from './types';
+import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment, CustomAlgorithm } from './types';
 
 interface WebSocketCallbacks {
   onConnect?: () => void;
@@ -24,6 +24,8 @@ interface WebSocketCallbacks {
   onPlaybackBookmarkAdded?: (bookmark: PlaybackBookmark) => void;
   onPlaybackBookmarkDeleted?: (data: { id: string }) => void;
   onPlaybackBookmarks?: (data: { bookmarks: PlaybackBookmark[] }) => void;
+  onAlgorithmUpdated?: (algorithm: CustomAlgorithm) => void;
+  onAlgorithmDeleted?: (data: { id: string }) => void;
 }
 
 export class WebSocketClient {
@@ -168,6 +170,12 @@ export class WebSocketClient {
         break;
       case 'bookmark-comment-deleted':
         this.callbacks.onBookmarkCommentDeleted?.(message.payload);
+        break;
+      case 'algorithm-updated':
+        this.callbacks.onAlgorithmUpdated?.(message.payload);
+        break;
+      case 'algorithm-deleted':
+        this.callbacks.onAlgorithmDeleted?.(message.payload);
         break;
     }
   }

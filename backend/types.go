@@ -152,6 +152,43 @@ type PlaybackState struct {
 	IsActive bool   `json:"isActive"`
 }
 
+type CustomAlgorithm struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Code       string    `json:"code"`
+	AuthorID   string    `json:"authorId"`
+	AuthorName string    `json:"authorName"`
+	CreatedAt  int64     `json:"createdAt"`
+	UpdatedAt  int64     `json:"updatedAt"`
+}
+
+type ExecuteAlgorithmRequest struct {
+	Code       string  `json:"code"`
+	MapData    MapData `json:"mapData"`
+	StartPoint Cell    `json:"startPoint"`
+	EndPoint   Cell    `json:"endPoint"`
+}
+
+type ExecuteAlgorithmResponse struct {
+	Path        []Cell  `json:"path"`
+	PathLength  int     `json:"pathLength"`
+	TotalCost   float64 `json:"totalCost"`
+	TimeMs      int64   `json:"timeMs"`
+	Error       string  `json:"error,omitempty"`
+}
+
+type CompareAlgorithmResponse struct {
+	CustomResult ExecuteAlgorithmResponse `json:"customResult"`
+	BFSResult    ExecuteAlgorithmResponse `json:"bfsResult"`
+	BetterThanBFS bool                    `json:"betterThanBFS"`
+}
+
+type SaveAlgorithmRequest struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
+	Code string `json:"code"`
+}
+
 type RoomState struct {
 	ID         string                `json:"id"`
 	MapData    MapData               `json:"mapData"`

@@ -249,3 +249,39 @@ export interface TooltipData {
   y: number;
   paths: ComparePathInfo[];
 }
+
+export interface CustomAlgorithm {
+  id: string;
+  name: string;
+  code: string;
+  authorId: string;
+  authorName: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ExecuteAlgorithmResponse {
+  path: Cell[];
+  pathLength: number;
+  totalCost: number;
+  timeMs: number;
+  error?: string;
+}
+
+export interface CompareAlgorithmResponse {
+  customResult: ExecuteAlgorithmResponse;
+  bfsResult: ExecuteAlgorithmResponse;
+  betterThanBFS: boolean;
+}
+
+export interface CustomAlgorithmState {
+  algorithms: CustomAlgorithm[];
+  expanded: boolean;
+  currentAlgorithm: CustomAlgorithm | null;
+  editorCode: string;
+  editorName: string;
+  isRunning: boolean;
+  compareResult: CompareAlgorithmResponse | null;
+  showCustomPath: boolean;
+  showBFSPath: boolean;
+}

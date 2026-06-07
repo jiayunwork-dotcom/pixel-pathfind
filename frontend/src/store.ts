@@ -23,6 +23,9 @@ import type {
   BookmarkComment,
   CompareBookmarkState,
   ComparePathInfo,
+  CustomAlgorithm,
+  CompareAlgorithmResponse,
+  CustomAlgorithmState,
 } from './types';
 import { cellKey } from './utils';
 import { createEmptyMap } from './mapTemplates';
@@ -996,3 +999,300 @@ export const heatmapStore = createHeatmapStore();
 export const bookmarksStore = createBookmarksStore();
 export const recordingStore = createRecordingStore();
 export const playbackStore = createPlaybackStore();
+
+const algorithmTemplate = `/**
+ * 自定义寻路算法模板
+ * @param {number[][]} costMap - 地形代价二维数组，costMap[y][x]表示格子代价
+ * @param {number} startX - 起点X坐标
+ * @param {number} startY - 起点Y坐标
+ * @param {number} endX - 终点X坐标
+ * @param {number} endY - 终点Y坐标
+ * @returns {{x: number, y: number}[]} 路径坐标数组，从起点到终点
+ *
+ * 可用常量: width (地图宽度), height (地图高度)
+ * 代价说明: 1=普通地面, 1.5=草地, 2=沙地, 3=水域, 5=沼泽, Infinity=障碍物
+ */
+function findPath(costMap, startX, startY, endX, endY) {
+  // 示例: 简单的BFS实现
+  const visited = new Set();
+  const parent = new Map();
+  const queue = [{ x: startX, y: startY }];
+  visited.add(startX + ',' + startY);
+
+  const directions = [
+    { dx: 1, dy: 0 }, { dx: -1, dy: 0 },
+    { dx: 0, dy: 1 }, { dx: 0, dy: -1 },
+    { dx: 1, dy: 1 }, { dx: 1, dy: -1 },
+    { dx: -1, dy: 1 }, { dx: -1, dy: -1 }
+  ];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (current.x === endX && current.y === endY) {
+      const path = [];
+      let node = current.x + ',' + current.y;
+      while (node) {
+        const [x, y] = node.split(',').map(Number);
+        path.unshift({ x, y });
+        node = parent.get(node);
+      }
+      return path;
+    }
+
+    for (const dir of directions) {
+      const nx = current.x + dir.dx;
+      const ny = current.y + dir.dy;
+      const key = nx + ',' + ny;
+
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+      if (visited.has(key)) continue;
+      if (costMap[ny][nx] === Infinity) continue;
+
+      visited.add(key);
+      parent.set(key, current.x + ',' + current.y);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+
+  return [];
+}`;
+
+const initialCustomAlgorithmState: CustomAlgorithmState = {
+  algorithms: [],
+  expanded: false,
+  currentAlgorithm: null,
+  editorCode: algorithmTemplate,
+  editorName: '',
+  isRunning: false,
+  compareResult: null,
+  showCustomPath: true,
+  showBFSPath: true,
+};
+
+function createCustomAlgorithmStore() {
+  const { subscribe, set, update } = writable<CustomAlgorithmState>(initialCustomAlgorithmState);
+
+  let currentUserId: string | null = null;
+  let currentUserName: string | null = null;
+  let currentRoomId: string | null = null;
+
+  return {
+    subscribe,
+
+    setUserInfo: (userId: string, userName: string) => {
+      currentUserId = userId;
+      currentUserName = userName;
+    },
+
+    setRoomId: (roomId: string) => {
+      currentRoomId = roomId;
+    },
+
+    setExpanded: (expanded: boolean) =>
+      update((state) => ({ ...state, expanded })),
+
+    setAlgorithms: (algorithms: CustomAlgorithm[]) =>
+      update((state) => ({ ...state, algorithms })),
+
+    addAlgorithm: (algorithm: CustomAlgorithm) =>
+      update((state) => {
+        const algorithms = [...state.algorithms];
+        const idx = algorithms.findIndex((a) => a.id === algorithm.id);
+        if (idx >= 0) {
+          algorithms[idx] = algorithm;
+        } else {
+          algorithms.push(algorithm);
+          if (algorithms.length > 5) {
+            algorithms.shift();
+          }
+        }
+        return { ...state, algorithms };
+      }),
+
+    deleteAlgorithm: (id: string) =>
+      update((state) => ({
+        ...state,
+        algorithms: state.algorithms.filter((a) => a.id !== id),
+        currentAlgorithm: state.currentAlgorithm?.id === id ? null : state.currentAlgorithm,
+      })),
+
+    loadAlgorithm: (algorithm: CustomAlgorithm) =>
+      update((state) => ({
+        ...state,
+        currentAlgorithm: algorithm,
+        editorCode: algorithm.code,
+        editorName: algorithm.name,
+        compareResult: null,
+      })),
+
+    setEditorCode: (code: string) =>
+      update((state) => ({ ...state, editorCode: code })),
+
+    setEditorName: (name: string) =>
+      update((state) => ({ ...state, editorName: name })),
+
+    setIsRunning: (isRunning: boolean) =>
+      update((state) => ({ ...state, isRunning })),
+
+    setCompareResult: (result: CompareAlgorithmResponse | null) =>
+      update((state) => ({ ...state, compareResult: result })),
+
+    setShowCustomPath: (show: boolean) =>
+      update((state) => ({ ...state, showCustomPath: show })),
+
+    setShowBFSPath: (show: boolean) =>
+      update((state) => ({ ...state, showBFSPath: show })),
+
+    newAlgorithm: () =>
+      update((state) => ({
+        ...state,
+        currentAlgorithm: null,
+        editorCode: algorithmTemplate,
+        editorName: '',
+        compareResult: null,
+      })),
+
+    async saveAlgorithm() {
+      const state = get(customAlgorithmStore);
+      if (!currentRoomId || !currentUserId || !currentUserName) {
+        uiStore.showToast('请先加入房间');
+        return;
+      }
+
+      const name = state.editorName.trim();
+      if (!name) {
+        uiStore.showToast('请输入算法名称');
+        return;
+      }
+      if (name.length > 20) {
+        uiStore.showToast('算法名称不能超过20字');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/room/${currentRoomId}/algorithms`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-ID': currentUserId,
+            'X-User-Name': currentUserName,
+          },
+          body: JSON.stringify({
+            id: state.currentAlgorithm?.id,
+            name,
+            code: state.editorCode,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || '保存失败');
+        }
+
+        uiStore.showToast('保存成功');
+        update((s) => ({
+          ...s,
+          currentAlgorithm: data.algorithm,
+        }));
+      } catch (e) {
+        uiStore.showToast('保存失败: ' + (e as Error).message);
+      }
+    },
+
+    async deleteAlgorithmById(id: string) {
+      if (!currentRoomId || !currentUserId) {
+        uiStore.showToast('请先加入房间');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/room/${currentRoomId}/algorithms/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'X-User-ID': currentUserId,
+          },
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || '删除失败');
+        }
+
+        uiStore.showToast('删除成功');
+      } catch (e) {
+        uiStore.showToast('删除失败: ' + (e as Error).message);
+      }
+    },
+
+    async executeAlgorithm() {
+      const state = get(customAlgorithmStore);
+      const mapState = get(mapStore);
+      const pfState = get(pathfindingStore);
+
+      if (!pfState.startPoint || !pfState.endPoint) {
+        uiStore.showToast('请先设置起点和终点');
+        return;
+      }
+
+      if (!state.editorCode.trim()) {
+        uiStore.showToast('代码不能为空');
+        return;
+      }
+
+      update((s) => ({ ...s, isRunning: true }));
+
+      try {
+        const response = await fetch('/api/algorithm/execute', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            code: state.editorCode,
+            mapData: mapState.mapData,
+            startPoint: pfState.startPoint,
+            endPoint: pfState.endPoint,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || '执行失败');
+        }
+
+        update((s) => ({
+          ...s,
+          isRunning: false,
+          compareResult: data,
+          showCustomPath: true,
+          showBFSPath: true,
+        }));
+
+        if (data.betterThanBFS) {
+          uiStore.showToast('🎉 恭喜！您的算法优于BFS基线！', 3000);
+        }
+      } catch (e) {
+        update((s) => ({ ...s, isRunning: false }));
+        uiStore.showToast('执行失败: ' + (e as Error).message);
+      }
+    },
+
+    async loadAlgorithms() {
+      if (!currentRoomId) return;
+      try {
+        const response = await fetch(`/api/room/${currentRoomId}/algorithms`);
+        const data = await response.json();
+        if (response.ok) {
+          update((state) => ({ ...state, algorithms: data.algorithms || [] }));
+        }
+      } catch (e) {
+        console.error('加载算法列表失败:', e);
+      }
+    },
+
+    reset: () => set(initialCustomAlgorithmState),
+  };
+}
+
+export const customAlgorithmStore = createCustomAlgorithmStore();

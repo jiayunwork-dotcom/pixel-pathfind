@@ -230,6 +230,7 @@ func (s *Store) DeleteRoom(roomID string) error {
 	pipe.Del(ctx, fmt.Sprintf("room:%s:recorded_ops", roomID))
 	pipe.Del(ctx, fmt.Sprintf("room:%s:snapshots", roomID))
 	pipe.Del(ctx, fmt.Sprintf("room:%s:playback_bookmarks", roomID))
+	pipe.Del(ctx, fmt.Sprintf("room:%s:algorithms", roomID))
 
 	bookmarks, err := s.LoadBookmarks(roomID)
 	if err == nil {
@@ -368,4 +369,100 @@ func (s *Store) LoadAllBookmarkComments(roomID string, bookmarkIDs []string) (ma
 		result[bookmarkID] = comments
 	}
 	return result, nil
+}
+
+func (s *Store) SaveAlgorithm(roomID string, algorithm CustomAlgorithm) error {
+	key := fmt.Sprintf("room:%s:algorithms", roomID)
+	algorithms, err := s.LoadAlgorithms(roomID)
+	if err != nil {
+		algorithms = []CustomAlgorithm{}
+	}
+
+	exists := false
+	for i, a := range algorithms {
+		if a.ID == algorithm.ID {
+			algorithms[i] = algorithm
+			exists = true
+			break
+		}
+	}
+
+	if !exists {
+		if len(algorithms) >= 5 {
+			algorithms = algorithms[1:]
+		}
+		algorithms = append(algorithms, algorithm)
+	}
+
+	data, err := json.Marshal(algorithms)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(ctx, key, data, 24*time.Hour).Err()
+}
+
+func (s *Store) LoadAlgorithms(roomID string) ([]CustomAlgorithm, error) {
+	key := fmt.Sprintf("room:%s:algorithms", roomID)
+	data, err := s.rdb.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return []CustomAlgorithm{}, nil
+		}
+		return nil, err
+	}
+
+	var algorithms []CustomAlgorithm
+	if err := json.Unmarshal([]byte(data), &algorithms); err != nil {
+		return nil, err
+	}
+	return algorithms, nil
+}
+
+func (s *Store) DeleteAlgorithm(roomID, algorithmID, userID string) (bool, error) {
+	key := fmt.Sprintf("room:%s:algorithms", roomID)
+	algorithms, err := s.LoadAlgorithms(roomID)
+	if err != nil {
+		return false, err
+	}
+
+	found := false
+	allowed := false
+	for i, a := range algorithms {
+		if a.ID == algorithmID {
+			found = true
+			if a.AuthorID == userID {
+				allowed = true
+				algorithms = append(algorithms[:i], algorithms[i+1:]...)
+			}
+			break
+		}
+	}
+
+	if !found {
+		return false, fmt.Errorf("algorithm not found")
+	}
+
+	if !allowed {
+		return false, fmt.Errorf("permission denied")
+	}
+
+	data, err := json.Marshal(algorithms)
+	if err != nil {
+		return false, err
+	}
+	return true, s.rdb.Set(ctx, key, data, 24*time.Hour).Err()
+}
+
+func (s *Store) LoadAlgorithm(roomID, algorithmID string) (*CustomAlgorithm, error) {
+	algorithms, err := s.LoadAlgorithms(roomID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, a := range algorithms {
+		if a.ID == algorithmID {
+			return &a, nil
+		}
+	}
+	return nil, fmt.Errorf("algorithm not found")
 }
