@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -161,15 +163,20 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": "保存失败"})
 		}
 
+		savedAlgorithm, err := roomManager.store.LoadAlgorithm(roomID, algorithm.ID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "保存失败"})
+		}
+
 		room, exists := roomManager.GetRoom(roomID)
 		if exists {
 			room.broadcast(Message{
 				Type: "algorithm-updated",
-				Payload: algorithm,
+				Payload: savedAlgorithm,
 			}, "")
 		}
 
-		return c.JSON(fiber.Map{"algorithm": algorithm})
+		return c.JSON(fiber.Map{"algorithm": savedAlgorithm})
 	})
 
 	app.Delete("/api/room/:id/algorithms/:algoId", func(c *fiber.Ctx) error {
@@ -213,8 +220,10 @@ func main() {
 		versionStr := c.Query("version", "0")
 		version, _ := strconv.Atoi(versionStr)
 		roomID := c.Query("roomId", "")
+		stream := c.Query("stream", "false") == "true"
 
 		metricsChan := make(chan SandboxMetrics, 10)
+		done := make(chan struct{})
 		go func() {
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
@@ -226,11 +235,17 @@ func main() {
 					var m runtime.MemStats
 					runtime.ReadMemStats(&m)
 					elapsed := time.Since(startTime).Milliseconds()
-					metricsChan <- SandboxMetrics{
+					select {
+					case metricsChan <- SandboxMetrics{
 						MemoryMB:   float64(m.Alloc) / 1024 / 1024,
 						TimeMs:     elapsed,
 						IsFinished: false,
+					}:
+					case <-done:
+						return
 					}
+				case <-done:
+					return
 				case <-time.After(MaxExecutionTime + 500*time.Millisecond):
 					return
 				}
@@ -239,6 +254,8 @@ func main() {
 
 		customResult := ExecuteInSandbox(req.Code, req.MapData, req.StartPoint, req.EndPoint)
 		bfsResult := BFSAlgorithm(req.MapData, req.StartPoint, req.EndPoint)
+
+		close(done)
 
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
@@ -287,6 +304,30 @@ func main() {
 		}
 
 		mapHash := calculateMapHash(req.MapData)
+
+		if stream {
+			c.Set("Content-Type", "text/event-stream")
+			c.Set("Cache-Control", "no-cache")
+			c.Set("Connection", "keep-alive")
+			c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+				for metrics := range metricsChan {
+					data, _ := json.Marshal(metrics)
+					fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", data)
+					w.Flush()
+				}
+				result := fiber.Map{
+					"customResult":  customResp,
+					"bfsResult":     bfsResp,
+					"betterThanBFS": betterThanBFS,
+					"metrics":       finalMetrics,
+					"mapHash":       mapHash,
+				}
+				resultData, _ := json.Marshal(result)
+				fmt.Fprintf(w, "event: result\ndata: %s\n\n", resultData)
+				w.Flush()
+			})
+			return nil
+		}
 
 		return c.JSON(fiber.Map{
 			"customResult":  customResp,

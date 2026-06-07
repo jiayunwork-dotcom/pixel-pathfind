@@ -1395,25 +1395,6 @@ function createCustomAlgorithmStore() {
         sandboxMetrics: { memoryMB: 0, timeMs: 0, isFinished: false },
       }));
 
-      let metricsInterval: number | null = null;
-      metricsInterval = window.setInterval(() => {
-        const currentState = get(customAlgorithmStore);
-        if (!currentState.isRunning) {
-          if (metricsInterval) clearInterval(metricsInterval);
-          return;
-        }
-        const elapsed = currentState.sandboxMetrics.timeMs + 50;
-        const memoryEstimate = Math.min(30, elapsed / 100);
-        update((s) => ({
-          ...s,
-          sandboxMetrics: {
-            memoryMB: memoryEstimate,
-            timeMs: elapsed,
-            isFinished: false,
-          },
-        }));
-      }, 50);
-
       try {
         const mapHash = calculateMapHash(mapState.mapData);
         const params = new URLSearchParams();
@@ -1422,6 +1403,7 @@ function createCustomAlgorithmStore() {
           params.set('version', String(state.currentAlgorithm.currentVersion));
           params.set('roomId', currentRoomId);
         }
+        params.set('stream', 'true');
 
         const response = await fetch(`/api/algorithm/execute?${params.toString()}`, {
           method: 'POST',
@@ -1436,28 +1418,65 @@ function createCustomAlgorithmStore() {
           }),
         });
 
-        const data = await response.json();
         if (!response.ok) {
-          throw new Error(data.error || '执行失败');
+          const errorData = await response.json();
+          throw new Error(errorData.error || '执行失败');
         }
 
-        if (metricsInterval) clearInterval(metricsInterval);
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('无法获取响应流');
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let resultData: any = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: metrics')) {
+              const dataLine = line.split('\n')[1];
+              if (dataLine?.startsWith('data: ')) {
+                const metrics = JSON.parse(dataLine.slice(6));
+                update((s) => ({
+                  ...s,
+                  sandboxMetrics: metrics,
+                }));
+              }
+            } else if (line.startsWith('event: result')) {
+              const dataLine = line.split('\n')[1];
+              if (dataLine?.startsWith('data: ')) {
+                resultData = JSON.parse(dataLine.slice(6));
+              }
+            }
+          }
+        }
+
+        if (!resultData) {
+          throw new Error('未收到执行结果');
+        }
 
         update((s) => ({
           ...s,
           isRunning: false,
-          compareResult: data,
-          sandboxMetrics: data.metrics || { memoryMB: 0, timeMs: 0, isFinished: true },
-          currentMapHash: data.mapHash || mapHash,
+          compareResult: resultData,
+          sandboxMetrics: resultData.metrics || { memoryMB: 0, timeMs: 0, isFinished: true },
+          currentMapHash: resultData.mapHash || mapHash,
           showCustomPath: true,
           showBFSPath: true,
         }));
 
-        if (data.betterThanBFS) {
+        if (resultData.betterThanBFS) {
           uiStore.showToast('🎉 恭喜！您的算法优于BFS基线！', 3000);
         }
       } catch (e) {
-        if (metricsInterval) clearInterval(metricsInterval);
         update((s) => ({
           ...s,
           isRunning: false,

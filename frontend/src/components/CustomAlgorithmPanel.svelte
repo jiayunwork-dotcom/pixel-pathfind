@@ -209,6 +209,10 @@
     }
     wsClient.addAlgorithmComment(algoId, content);
     newCommentText = '';
+    requestAnimationFrame(() => {
+      const input = document.getElementById(`comment-input-${algoId}`) as HTMLInputElement;
+      input?.focus();
+    });
   }
 
   function handleDeleteComment(algoId: string, commentId: string) {
@@ -325,6 +329,7 @@
                     </div>
                     <div class="flex gap-1 mb-2">
                       <input
+                        id={`comment-input-${algo.id}`}
                         type="text"
                         bind:value={newCommentText}
                         placeholder="输入评论（最多200字）"
@@ -592,32 +597,42 @@
         <div class="mb-6">
           <h4 class="text-sm font-semibold mb-3 text-muted">性能趋势图</h4>
           <div class="h-48 bg-[#0d0d1a] rounded p-4 relative">
+            {#if state.versionCompareData.filter(d => d.hasResult).length < 2}
+              <div class="absolute inset-0 flex items-center justify-center text-muted text-xs">
+                需要至少2个版本的运行数据才能绘制趋势图
+              </div>
+            {/if}
             <svg width="100%" height="100%" viewBox="0 0 600 160" preserveAspectRatio="none">
               <line x1="40" y1="10" x2="40" y2="140" stroke="#2d2d44" stroke-width="1"/>
               <line x1="40" y1="140" x2="580" y2="140" stroke="#2d2d44" stroke-width="1"/>
               
               {#each state.versionCompareData.filter(d => d.hasResult) as data, idx}
                 {@const maxCost = getMaxCost(state.versionCompareData)}
-                {@const x = 40 + (idx / Math.max(1, state.versionCompareData.filter(d => d.hasResult).length - 1)) * 540}
+                {@const totalPoints = Math.max(1, state.versionCompareData.filter(d => d.hasResult).length)}
+                {@const x = totalPoints === 1 ? 300 : 40 + (idx / (totalPoints - 1)) * 540}
                 {@const y = 140 - (data.totalCost / maxCost) * 120}
                 <circle cx={x} cy={y} r="5" fill="#9b59b6"/>
                 <text x={x} y={y - 8} text-anchor="middle" fill="#f39c12" font-size="10">{data.totalCost.toFixed(1)}</text>
               {/each}
               
-              <polyline
-                points={state.versionCompareData.filter(d => d.hasResult).map((data, idx) => {
-                  const maxCost = getMaxCost(state.versionCompareData);
-                  const x = 40 + (idx / Math.max(1, state.versionCompareData.filter(d => d.hasResult).length - 1)) * 540;
-                  const y = 140 - (data.totalCost / maxCost) * 120;
-                  return `${x},${y}`;
-                }).join(' ')}
-                fill="none"
-                stroke="#9b59b6"
-                stroke-width="2"
-              />
+              {#if state.versionCompareData.filter(d => d.hasResult).length >= 2}
+                <polyline
+                  points={state.versionCompareData.filter(d => d.hasResult).map((data, idx) => {
+                    const maxCost = getMaxCost(state.versionCompareData);
+                    const totalPoints = state.versionCompareData.filter(d => d.hasResult).length;
+                    const x = 40 + (idx / (totalPoints - 1)) * 540;
+                    const y = 140 - (data.totalCost / maxCost) * 120;
+                    return `${x},${y}`;
+                  }).join(' ')}
+                  fill="none"
+                  stroke="#9b59b6"
+                  stroke-width="2"
+                />
+              {/if}
               
               {#each state.versionCompareData.filter(d => d.hasResult) as data, idx}
-                {@const x = 40 + (idx / Math.max(1, state.versionCompareData.filter(d => d.hasResult).length - 1)) * 540}
+                {@const totalPoints = Math.max(1, state.versionCompareData.filter(d => d.hasResult).length)}
+                {@const x = totalPoints === 1 ? 300 : 40 + (idx / (totalPoints - 1)) * 540}
                 <text x={x} y="155" text-anchor="middle" fill="#888" font-size="10">v{data.version}</text>
               {/each}
               
