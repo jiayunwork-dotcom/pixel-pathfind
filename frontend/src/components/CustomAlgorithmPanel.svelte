@@ -1,15 +1,18 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { customAlgorithmStore, mapStore, uiStore } from '../store';
-  import type { CustomAlgorithm } from '../types';
+  import type { CustomAlgorithm, AlgorithmComment, VersionCompareData } from '../types';
   import { EditorView, basicSetup } from 'codemirror';
   import { javascript } from '@codemirror/lang-javascript';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion, completeFromList } from '@codemirror/autocomplete';
+  import { wsClient } from '../websocket';
 
   let editorContainer: HTMLDivElement;
   let editorView: EditorView | null = null;
   let currentUserId: string | null = null;
+  let newCommentText = '';
+  let showVersionCompareModal = false;
 
   $: state = $customAlgorithmStore;
   $: mapState = $mapStore;
@@ -87,6 +90,16 @@
     customAlgorithmStore.setExpanded(!state.expanded);
   }
 
+  function toggleAlgorithmExpand(algoId: string) {
+    if (state.expandedAlgorithmId === algoId) {
+      customAlgorithmStore.setExpandedAlgorithmId(null);
+    } else {
+      customAlgorithmStore.setExpandedAlgorithmId(algoId);
+      customAlgorithmStore.loadAlgorithmComments(algoId);
+      customAlgorithmStore.markCommentsAsRead(algoId);
+    }
+  }
+
   function handleNew() {
     const name = prompt('请输入新算法名称（不超过20字）:');
     if (!name || !name.trim()) {
@@ -103,6 +116,11 @@
 
   function handleLoad(algo: CustomAlgorithm) {
     customAlgorithmStore.loadAlgorithm(algo);
+  }
+
+  function handleLoadVersion(algo: CustomAlgorithm, version: number) {
+    customAlgorithmStore.loadVersion(algo.id, version);
+    uiStore.showToast(`已加载版本 v${version}`);
   }
 
   function handleDelete(algo: CustomAlgorithm) {
@@ -129,6 +147,10 @@
     return algo.authorId === currentUserId;
   }
 
+  function canDeleteComment(comment: AlgorithmComment): boolean {
+    return comment.userId === currentUserId;
+  }
+
   function isCurrentAlgorithm(algoId: string): boolean {
     return state.currentAlgorithm && state.currentAlgorithm.id === algoId;
   }
@@ -146,6 +168,62 @@
   function handleShowBFSPathChange(e: Event) {
     const target = e.target as HTMLInputElement;
     customAlgorithmStore.setShowBFSPath(target.checked);
+  }
+
+  function getMemoryProgressClass(): string {
+    const mem = state.sandboxMetrics.memoryMB;
+    if (mem >= 50) return 'progress-red';
+    if (mem >= 40) return 'progress-orange';
+    return 'progress-green';
+  }
+
+  function getTimeProgressClass(): string {
+    const time = state.sandboxMetrics.timeMs;
+    if (time >= 3000) return 'progress-red';
+    if (time >= 2500) return 'progress-orange';
+    return 'progress-green';
+  }
+
+  function handleShowVersionCompare() {
+    if (!state.currentAlgorithm || !state.currentMapHash) {
+      uiStore.showToast('请先运行算法以获取对比数据');
+      return;
+    }
+    customAlgorithmStore.loadVersionCompareData(state.currentAlgorithm.id, state.currentMapHash);
+    showVersionCompareModal = true;
+  }
+
+  function handleCloseVersionCompare() {
+    showVersionCompareModal = false;
+  }
+
+  function handleAddComment(algoId: string) {
+    const content = newCommentText.trim();
+    if (!content) {
+      uiStore.showToast('评论内容不能为空');
+      return;
+    }
+    if (content.length > 200) {
+      uiStore.showToast('评论内容不能超过200字');
+      return;
+    }
+    wsClient.addAlgorithmComment(algoId, content);
+    newCommentText = '';
+  }
+
+  function handleDeleteComment(algoId: string, commentId: string) {
+    if (confirm('确定要删除这条评论吗？')) {
+      wsClient.deleteAlgorithmComment(algoId, commentId);
+    }
+  }
+
+  function getAlgoComments(algoId: string): AlgorithmComment[] {
+    return state.comments[algoId] || [];
+  }
+
+  function getMaxCost(data: VersionCompareData[]): number {
+    const costs = data.filter(d => d.hasResult).map(d => d.totalCost);
+    return costs.length > 0 ? Math.max(...costs) * 1.1 : 100;
   }
 </script>
 
@@ -175,38 +253,124 @@
           暂无保存的算法，点击"新建"开始创建
         </div>
       {:else}
-        <div class="space-y-2 max-h-40 overflow-y-auto">
+        <div class="space-y-2 max-h-60 overflow-y-auto">
           {#each state.algorithms as algo (algo.id)}
             <div
-              class="p-2 bg-[#0d0d1a] rounded text-xs flex items-center justify-between group"
+              class="p-2 bg-[#0d0d1a] rounded text-xs"
               class:border-[#9b59b6]={isCurrentAlgorithm(algo.id)}
               class:border-2={isCurrentAlgorithm(algo.id)}
             >
-              <div class="flex-1 min-w-0">
-                <div class="font-semibold truncate" title={algo.name}>{algo.name}</div>
-                <div class="text-[10px] text-muted">
-                  作者: {algo.authorName} · {formatTime(algo.updatedAt)}
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0 cursor-pointer" on:click={() => toggleAlgorithmExpand(algo.id)}>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-muted">
+                      {state.expandedAlgorithmId === algo.id ? '▼' : '▶'}
+                    </span>
+                    <span class="font-semibold truncate" title={algo.name}>{algo.name}</span>
+                    {#if customAlgorithmStore.hasNewComments(algo.id)}
+                      <span class="px-1.5 py-0.5 rounded-full bg-[#e74c3c] text-white text-[9px]">新</span>
+                    {/if}
+                  </div>
+                  <div class="text-[10px] text-muted ml-4">
+                    作者: {algo.authorName} · {formatTime(algo.updatedAt)}
+                    <span class="ml-2 text-[#9b59b6]">
+                      v{algo.currentVersion || 1} · {algo.versionCount || 1}个版本
+                    </span>
+                  </div>
+                </div>
+                <div class="flex gap-1 ml-2">
+                  <button
+                    on:click={() => handleLoad(algo)}
+                    class="px-2 py-1 rounded bg-[#2d2d44] hover:bg-[#3d3d54] text-[10px]"
+                    title="加载最新版本"
+                  >
+                    加载
+                  </button>
+                  <button
+                    on:click={() => handleDelete(algo)}
+                    class="px-2 py-1 rounded bg-[#2d2d44] hover:bg-[#c0392b] text-[10px]"
+                    class:opacity-50={!canDelete(algo)}
+                    class:cursor-not-allowed={!canDelete(algo)}
+                    disabled={!canDelete(algo)}
+                    title={canDelete(algo) ? '删除' : '只能删除自己的算法'}
+                  >
+                    删除
+                  </button>
                 </div>
               </div>
-              <div class="flex gap-1 ml-2">
-                <button
-                  on:click={() => handleLoad(algo)}
-                  class="px-2 py-1 rounded bg-[#2d2d44] hover:bg-[#3d3d54] text-[10px]"
-                  title="加载"
-                >
-                  加载
-                </button>
-                <button
-                  on:click={() => handleDelete(algo)}
-                  class="px-2 py-1 rounded bg-[#2d2d44] hover:bg-[#c0392b] text-[10px]"
-                  class:opacity-50={!canDelete(algo)}
-                  class:cursor-not-allowed={!canDelete(algo)}
-                  disabled={!canDelete(algo)}
-                  title={canDelete(algo) ? '删除' : '只能删除自己的算法'}
-                >
-                  删除
-                </button>
-              </div>
+
+              {#if state.expandedAlgorithmId === algo.id}
+                <div class="mt-2 ml-4 border-l-2 border-[#2d2d44] pl-3">
+                  {#if algo.versions && algo.versions.length > 0}
+                    <div class="mb-2">
+                      <div class="text-[10px] font-semibold text-muted mb-1">版本历史：</div>
+                      <div class="flex flex-wrap gap-1">
+                        {#each algo.versions as ver (ver.version)}
+                          <button
+                            on:click={() => handleLoadVersion(algo, ver.version)}
+                            class="px-2 py-0.5 rounded text-[10px] bg-[#2d2d44] hover:bg-[#3d3d54] transition-colors"
+                            class:bg-[#9b59b6]={state.loadedVersion === ver.version || (ver.version === algo.currentVersion && !state.loadedVersion)}
+                            title={`${formatTime(ver.createdAt)}`}
+                          >
+                            v{ver.version}
+                          </button>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+
+                  <div class="mb-2">
+                    <div class="flex items-center gap-2 mb-1">
+                      <div class="text-[10px] font-semibold text-muted">评论 ({getAlgoComments(algo.id).length}/20)：</div>
+                    </div>
+                    <div class="flex gap-1 mb-2">
+                      <input
+                        type="text"
+                        bind:value={newCommentText}
+                        placeholder="输入评论（最多200字）"
+                        maxlength="200"
+                        class="flex-1 bg-[#0d0d1a] border border-[#2d2d44] rounded px-2 py-1 text-xs"
+                        on:keydown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleAddComment(algo.id);
+                          }
+                        }}
+                      />
+                      <button
+                        on:click={() => handleAddComment(algo.id)}
+                        class="px-2 py-1 rounded bg-[#9b59b6] hover:bg-[#8e44ad] text-white text-xs"
+                        disabled={!newCommentText.trim()}
+                      >
+                        发送
+                      </button>
+                    </div>
+                    <div class="space-y-1 max-h-32 overflow-y-auto">
+                      {#each getAlgoComments(algo.id) as comment (comment.id)}
+                        <div class="p-2 bg-[#0d0d1a] rounded text-[10px] group">
+                          <div class="flex items-center justify-between mb-1">
+                            <span class="font-semibold text-[#9b59b6]">{comment.userName}</span>
+                            <span class="text-[#666]">{formatTime(comment.createdAt)}</span>
+                          </div>
+                          <div class="text-muted break-words">{comment.content}</div>
+                          {#if canDeleteComment(comment)}
+                            <button
+                              on:click={() => handleDeleteComment(algo.id, comment.id)}
+                              class="mt-1 text-[#e74c3c] text-[9px] opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              删除
+                            </button>
+                          {/if}
+                        </div>
+                      {:else}
+                        <div class="text-center text-[10px] text-muted py-2">
+                          暂无评论，来说点什么吧
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -224,8 +388,14 @@
         class="w-full bg-[#0d0d1a] border border-[#2d2d44] rounded px-3 py-2 text-sm"
       />
       {#if state.currentAlgorithm}
-        <div class="text-[10px] text-muted mt-1">
-          作者: {state.currentAlgorithm.authorName} · 创建于 {formatTime(state.currentAlgorithm.createdAt)}
+        <div class="text-[10px] text-muted mt-1 flex items-center gap-2">
+          <span>作者: {state.currentAlgorithm.authorName} · 创建于 {formatTime(state.currentAlgorithm.createdAt)}</span>
+          <span class="text-[#9b59b6]">
+            当前版本: v{state.currentAlgorithm.currentVersion || 1}
+            {#if state.loadedVersion}
+              <span class="text-[#f39c12] ml-1">(已加载 v{state.loadedVersion})</span>
+            {/if}
+          </span>
         </div>
       {/if}
     </div>
@@ -237,6 +407,41 @@
         <p>• 必须定义 <code class="text-[#f39c12]">findPath(costMap, startX, startY, endX, endY)</code> 函数</p>
         <p>• 返回值格式: <code class="text-[#f39c12]">[{'{x, y}'}, {'{x, y}'}]</code> 或 <code class="text-[#f39c12]">[[x, y], [x, y]]</code></p>
         <p>• 沙盒限制: 3秒超时 · 50MB内存 · 禁止网络/文件访问</p>
+      </div>
+    </div>
+
+    <div class="mb-3 p-2 bg-[#0d0d1a] rounded border border-[#2d2d44]">
+      <div class="text-[10px] font-semibold text-muted mb-2">沙盒资源监控</div>
+      <div class="space-y-2">
+        <div>
+          <div class="flex justify-between text-[10px] mb-1">
+            <span class="text-muted">内存占用</span>
+            <span class={getMemoryProgressClass()}>{state.sandboxMetrics.memoryMB.toFixed(1)} MB / 50 MB</span>
+          </div>
+          <div class="h-2 bg-[#1a1a2e] rounded-full overflow-hidden">
+            <div
+              class={`h-full transition-all duration-300 ${getMemoryProgressClass()}`}
+              style={`width: ${Math.min(100, (state.sandboxMetrics.memoryMB / 50) * 100)}%`}
+            ></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-[10px] mb-1">
+            <span class="text-muted">执行时间</span>
+            <span class={getTimeProgressClass()}>{state.sandboxMetrics.timeMs} ms / 3000 ms</span>
+          </div>
+          <div class="h-2 bg-[#1a1a2e] rounded-full overflow-hidden">
+            <div
+              class={`h-full transition-all duration-300 ${getTimeProgressClass()}`}
+              style={`width: ${Math.min(100, (state.sandboxMetrics.timeMs / 3000) * 100)}%`}
+            ></div>
+          </div>
+        </div>
+      </div>
+      <div class="text-[9px] text-muted mt-2">
+        <span class="inline-block w-2 h-2 rounded-full bg-[#27ae60] mr-1"></span>正常
+        <span class="inline-block w-2 h-2 rounded-full bg-[#f39c12] ml-3 mr-1"></span>警告
+        <span class="inline-block w-2 h-2 rounded-full bg-[#e74c3c] ml-3 mr-1"></span>超限
       </div>
     </div>
 
@@ -261,11 +466,20 @@
       <div class="bg-[#0d0d1a] rounded-lg p-3">
         <div class="flex items-center justify-between mb-3">
           <h4 class="text-sm font-semibold text-[#4a9eff]">运行结果对比</h4>
-          {#if state.compareResult.betterThanBFS}
-            <span class="px-2 py-1 rounded bg-[#27ae60] text-white text-xs font-bold">
-              ✓ 优于基线
-            </span>
-          {/if}
+          <div class="flex items-center gap-2">
+            {#if state.compareResult.betterThanBFS}
+              <span class="px-2 py-1 rounded bg-[#27ae60] text-white text-xs font-bold">
+                ✓ 优于基线
+              </span>
+            {/if}
+            <button
+              on:click={handleShowVersionCompare}
+              class="px-2 py-1 rounded bg-[#f39c12] hover:bg-[#e67e22] text-white text-xs font-semibold"
+              title="对比各版本性能"
+            >
+              📊 版本对比
+            </button>
+          </div>
         </div>
 
         <div class="flex gap-2 mb-3">
@@ -354,6 +568,107 @@
   {/if}
 </div>
 
+{#if showVersionCompareModal}
+  <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" on:click={handleCloseVersionCompare}>
+    <div class="bg-[#16162a] rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto" on:click|stopPropagation>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-[#9b59b6]">版本性能对比</h3>
+        <button on:click={handleCloseVersionCompare} class="text-muted hover:text-white text-xl">&times;</button>
+      </div>
+
+      {#if state.currentAlgorithm}
+        <div class="mb-4 text-sm text-muted">
+          算法: <span class="text-white font-semibold">{state.currentAlgorithm.name}</span>
+          <span class="mx-2">·</span>
+          地图哈希: <span class="font-mono text-[#f39c12]">{state.currentMapHash}</span>
+        </div>
+      {/if}
+
+      {#if state.versionCompareData.length === 0}
+        <div class="text-center py-8 text-muted">
+          暂无对比数据，请先在相同地图上运行不同版本的算法
+        </div>
+      {:else}
+        <div class="mb-6">
+          <h4 class="text-sm font-semibold mb-3 text-muted">性能趋势图</h4>
+          <div class="h-48 bg-[#0d0d1a] rounded p-4 relative">
+            <svg width="100%" height="100%" viewBox="0 0 600 160" preserveAspectRatio="none">
+              <line x1="40" y1="10" x2="40" y2="140" stroke="#2d2d44" stroke-width="1"/>
+              <line x1="40" y1="140" x2="580" y2="140" stroke="#2d2d44" stroke-width="1"/>
+              
+              {#each state.versionCompareData.filter(d => d.hasResult) as data, idx}
+                {@const maxCost = getMaxCost(state.versionCompareData)}
+                {@const x = 40 + (idx / Math.max(1, state.versionCompareData.filter(d => d.hasResult).length - 1)) * 540}
+                {@const y = 140 - (data.totalCost / maxCost) * 120}
+                <circle cx={x} cy={y} r="5" fill="#9b59b6"/>
+                <text x={x} y={y - 8} text-anchor="middle" fill="#f39c12" font-size="10">{data.totalCost.toFixed(1)}</text>
+              {/each}
+              
+              <polyline
+                points={state.versionCompareData.filter(d => d.hasResult).map((data, idx) => {
+                  const maxCost = getMaxCost(state.versionCompareData);
+                  const x = 40 + (idx / Math.max(1, state.versionCompareData.filter(d => d.hasResult).length - 1)) * 540;
+                  const y = 140 - (data.totalCost / maxCost) * 120;
+                  return `${x},${y}`;
+                }).join(' ')}
+                fill="none"
+                stroke="#9b59b6"
+                stroke-width="2"
+              />
+              
+              {#each state.versionCompareData.filter(d => d.hasResult) as data, idx}
+                {@const x = 40 + (idx / Math.max(1, state.versionCompareData.filter(d => d.hasResult).length - 1)) * 540}
+                <text x={x} y="155" text-anchor="middle" fill="#888" font-size="10">v{data.version}</text>
+              {/each}
+              
+              <text x="5" y="20" fill="#888" font-size="10" transform="rotate(-90, 5, 20)">总代价</text>
+              <text x="300" y="155" fill="#888" font-size="10" text-anchor="middle">版本</text>
+            </svg>
+          </div>
+        </div>
+
+        <h4 class="text-sm font-semibold mb-3 text-muted">详细数据</h4>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-muted border-b border-[#2d2d44]">
+                <th class="text-left py-2 px-2">版本</th>
+                <th class="text-center py-2 px-2">路径长度</th>
+                <th class="text-center py-2 px-2">总代价</th>
+                <th class="text-center py-2 px-2">执行耗时</th>
+                <th class="text-center py-2 px-2">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each state.versionCompareData as data (data.version)}
+                <tr class="border-b border-[#1a1a2e] hover:bg-[#1a1a2e]">
+                  <td class="py-2 px-2 font-semibold text-[#9b59b6]">v{data.version}</td>
+                  <td class="text-center py-2 px-2 font-mono">
+                    {data.hasResult ? data.pathLength + ' 格' : '-'}
+                  </td>
+                  <td class="text-center py-2 px-2 font-mono">
+                    {data.hasResult ? data.totalCost.toFixed(2) : '-'}
+                  </td>
+                  <td class="text-center py-2 px-2 font-mono">
+                    {data.hasResult ? data.timeMs + ' ms' : '-'}
+                  </td>
+                  <td class="text-center py-2 px-2">
+                    {#if data.hasResult}
+                      <span class="px-2 py-0.5 rounded bg-[#27ae60]/20 text-[#27ae60] text-[10px]">有数据</span>
+                    {:else}
+                      <span class="px-2 py-0.5 rounded bg-[#f39c12]/20 text-[#f39c12] text-[10px]">未运行</span>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
+
 <style>
   .panel {
     background: #16162a;
@@ -369,5 +684,20 @@
 
   :global(.cm-scroller) {
     overflow: auto;
+  }
+
+  .progress-green {
+    color: #27ae60;
+    background-color: #27ae60;
+  }
+
+  .progress-orange {
+    color: #f39c12;
+    background-color: #f39c12;
+  }
+
+  .progress-red {
+    color: #e74c3c;
+    background-color: #e74c3c;
   }
 </style>

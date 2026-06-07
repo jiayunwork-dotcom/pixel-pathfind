@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,11 +52,66 @@ func main() {
 
 	app.Get("/api/room/:id/algorithms", func(c *fiber.Ctx) error {
 		roomID := c.Params("id")
-		algorithms, err := roomManager.store.LoadAlgorithms(roomID)
+		includeVersions := c.Query("includeVersions", "false") == "true"
+		algorithms, err := roomManager.store.LoadAlgorithms(roomID, includeVersions)
 		if err != nil {
 			return c.JSON(fiber.Map{"algorithms": []CustomAlgorithm{}})
 		}
 		return c.JSON(fiber.Map{"algorithms": algorithms})
+	})
+
+	app.Get("/api/room/:id/algorithms/:algoId/versions", func(c *fiber.Ctx) error {
+		roomID := c.Params("id")
+		algoID := c.Params("algoId")
+		versions, err := roomManager.store.LoadAlgorithmVersions(roomID, algoID)
+		if err != nil {
+			return c.JSON(fiber.Map{"versions": []AlgorithmVersion{}})
+		}
+		sort.Slice(versions, func(i, j int) bool {
+			return versions[i].Version > versions[j].Version
+		})
+		return c.JSON(fiber.Map{"versions": versions})
+	})
+
+	app.Get("/api/room/:id/algorithms/:algoId/versions/:version", func(c *fiber.Ctx) error {
+		roomID := c.Params("id")
+		algoID := c.Params("algoId")
+		version, err := strconv.Atoi(c.Params("version"))
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "无效的版本号"})
+		}
+
+		ver, err := roomManager.store.LoadAlgorithmVersion(roomID, algoID, version)
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "版本不存在"})
+		}
+		return c.JSON(fiber.Map{"version": ver})
+	})
+
+	app.Get("/api/room/:id/algorithms/:algoId/compare", func(c *fiber.Ctx) error {
+		roomID := c.Params("id")
+		algoID := c.Params("algoId")
+		mapHash := c.Query("mapHash", "")
+
+		if mapHash == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "缺少地图哈希参数"})
+		}
+
+		data, err := roomManager.store.GetAlgorithmVersionCompareData(roomID, algoID, mapHash)
+		if err != nil {
+			return c.JSON(fiber.Map{"compareData": []VersionCompareData{}})
+		}
+		return c.JSON(fiber.Map{"compareData": data})
+	})
+
+	app.Get("/api/room/:id/algorithms/:algoId/comments", func(c *fiber.Ctx) error {
+		roomID := c.Params("id")
+		algoID := c.Params("algoId")
+		comments, err := roomManager.store.LoadAlgorithmComments(roomID, algoID)
+		if err != nil {
+			return c.JSON(fiber.Map{"comments": []AlgorithmComment{}})
+		}
+		return c.JSON(fiber.Map{"comments": comments})
 	})
 
 	app.Post("/api/room/:id/algorithms", func(c *fiber.Ctx) error {
@@ -151,8 +209,62 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "代码不能为空"})
 		}
 
+		algoID := c.Query("algorithmId", "")
+		versionStr := c.Query("version", "0")
+		version, _ := strconv.Atoi(versionStr)
+		roomID := c.Query("roomId", "")
+
+		metricsChan := make(chan SandboxMetrics, 10)
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			startTime := time.Now()
+
+			for {
+				select {
+				case <-ticker.C:
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					elapsed := time.Since(startTime).Milliseconds()
+					metricsChan <- SandboxMetrics{
+						MemoryMB:   float64(m.Alloc) / 1024 / 1024,
+						TimeMs:     elapsed,
+						IsFinished: false,
+					}
+				case <-time.After(MaxExecutionTime + 500*time.Millisecond):
+					return
+				}
+			}
+		}()
+
 		customResult := ExecuteInSandbox(req.Code, req.MapData, req.StartPoint, req.EndPoint)
 		bfsResult := BFSAlgorithm(req.MapData, req.StartPoint, req.EndPoint)
+
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		finalMetrics := SandboxMetrics{
+			MemoryMB:   float64(m.Alloc) / 1024 / 1024,
+			TimeMs:     customResult.TimeMs,
+			IsFinished: true,
+		}
+
+		close(metricsChan)
+
+		if algoID != "" && roomID != "" && version > 0 {
+			mapHash := calculateMapHash(req.MapData)
+			cache := AlgorithmExecutionCache{
+				AlgorithmID: algoID,
+				Version:     version,
+				MapHash:     mapHash,
+				Path:        customResult.Path,
+				PathLength:  customResult.PathLength,
+				TotalCost:   customResult.TotalCost,
+				TimeMs:      customResult.TimeMs,
+				Error:       customResult.Error,
+				CreatedAt:   time.Now().UnixNano() / int64(time.Millisecond),
+			}
+			roomManager.store.SaveAlgorithmExecutionCache(roomID, cache)
+		}
 
 		customResp := ExecuteAlgorithmResponse{
 			Path:       customResult.Path,
@@ -174,10 +286,14 @@ func main() {
 			betterThanBFS = customResult.TotalCost < bfsResult.TotalCost
 		}
 
-		return c.JSON(CompareAlgorithmResponse{
-			CustomResult:  customResp,
-			BFSResult:     bfsResp,
-			BetterThanBFS: betterThanBFS,
+		mapHash := calculateMapHash(req.MapData)
+
+		return c.JSON(fiber.Map{
+			"customResult":  customResp,
+			"bfsResult":     bfsResp,
+			"betterThanBFS": betterThanBFS,
+			"metrics":       finalMetrics,
+			"mapHash":       mapHash,
 		})
 	})
 

@@ -161,18 +161,29 @@ func (rm *RoomManager) JoinRoom(roomID, userName string, conn *websocket.Conn) (
 	}
 	bookmarkComments, _ := room.store.LoadAllBookmarkComments(roomID, bookmarkIDs)
 
+	algorithms, _ := room.store.LoadAlgorithms(roomID)
+	algorithmIDs := make([]string, len(algorithms))
+	for i, a := range algorithms {
+		algorithmIDs[i] = a.ID
+	}
+	algorithmComments, _ := room.store.LoadAllAlgorithmComments(roomID, algorithmIDs)
+
+	algorithmsWithVersions, _ := room.store.LoadAlgorithms(roomID, true)
+
 	joinMsg := Message{
 		Type: "user-join",
 		Payload: map[string]interface{}{
-			"user":              user,
-			"users":             room.state.Users,
-			"roomId":            roomID,
-			"mapData":           room.state.MapData,
-			"yourId":            userID,
-			"bookmarks":         room.state.Bookmarks,
-			"bookmarkComments":  bookmarkComments,
-			"recording":         room.state.Recording,
-			"playbacks":         room.state.Playbacks,
+			"user":                user,
+			"users":               room.state.Users,
+			"roomId":              roomID,
+			"mapData":             room.state.MapData,
+			"yourId":              userID,
+			"bookmarks":           room.state.Bookmarks,
+			"bookmarkComments":    bookmarkComments,
+			"recording":           room.state.Recording,
+			"playbacks":           room.state.Playbacks,
+			"algorithms":          algorithmsWithVersions,
+			"algorithmComments":   algorithmComments,
 		},
 	}
 
@@ -681,6 +692,76 @@ func (r *Room) HandleMessage(userID string, msgType string, payload json.RawMess
 			Payload: map[string]string{
 				"bookmarkId": req.BookmarkID,
 				"commentId":  req.CommentID,
+			},
+		}, "")
+
+	case "algorithm-comment-add":
+		var req struct {
+			AlgorithmID string `json:"algorithmId"`
+			Content     string `json:"content"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		if len(req.Content) == 0 || len(req.Content) > 200 {
+			return
+		}
+
+		algorithmExists := false
+		algorithms, _ := r.store.LoadAlgorithms(r.ID)
+		for _, a := range algorithms {
+			if a.ID == req.AlgorithmID {
+				algorithmExists = true
+				break
+			}
+		}
+		if !algorithmExists {
+			return
+		}
+
+		userName := ""
+		if user, exists := r.state.Users[userID]; exists {
+			userName = user.Name
+		}
+
+		comment := AlgorithmComment{
+			ID:          uuid.New().String(),
+			AlgorithmID: req.AlgorithmID,
+			UserID:      userID,
+			UserName:    userName,
+			Content:     req.Content,
+			CreatedAt:   time.Now().UnixNano() / int64(time.Millisecond),
+		}
+
+		if err := r.store.SaveAlgorithmComment(r.ID, comment); err != nil {
+			return
+		}
+
+		r.broadcast(Message{
+			Type:    "algorithm-comment-added",
+			Payload: comment,
+		}, "")
+
+	case "algorithm-comment-delete":
+		var req struct {
+			AlgorithmID string `json:"algorithmId"`
+			CommentID   string `json:"commentId"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return
+		}
+
+		deleted, err := r.store.DeleteAlgorithmComment(r.ID, req.AlgorithmID, req.CommentID, userID)
+		if err != nil || !deleted {
+			return
+		}
+
+		r.broadcast(Message{
+			Type: "algorithm-comment-deleted",
+			Payload: map[string]string{
+				"algorithmId": req.AlgorithmID,
+				"commentId":   req.CommentID,
 			},
 		}, "")
 	}

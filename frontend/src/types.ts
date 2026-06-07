@@ -250,6 +250,19 @@ export interface TooltipData {
   paths: ComparePathInfo[];
 }
 
+export interface AlgorithmVersion {
+  id: string;
+  algorithmId: string;
+  version: number;
+  code: string;
+  createdAt: number;
+}
+
+export interface AlgorithmVersionInfo {
+  version: number;
+  createdAt: number;
+}
+
 export interface CustomAlgorithm {
   id: string;
   name: string;
@@ -258,6 +271,44 @@ export interface CustomAlgorithm {
   authorName: string;
   createdAt: number;
   updatedAt: number;
+  currentVersion: number;
+  versionCount: number;
+  versions?: AlgorithmVersionInfo[];
+}
+
+export interface AlgorithmComment {
+  id: string;
+  algorithmId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  createdAt: number;
+}
+
+export interface AlgorithmExecutionCache {
+  algorithmId: string;
+  version: number;
+  mapHash: string;
+  path: Cell[];
+  pathLength: number;
+  totalCost: number;
+  timeMs: number;
+  error?: string;
+  createdAt: number;
+}
+
+export interface VersionCompareData {
+  version: number;
+  pathLength: number;
+  totalCost: number;
+  timeMs: number;
+  hasResult: boolean;
+}
+
+export interface SandboxMetrics {
+  memoryMB: number;
+  timeMs: number;
+  isFinished: boolean;
 }
 
 export interface ExecuteAlgorithmResponse {
@@ -274,6 +325,14 @@ export interface CompareAlgorithmResponse {
   betterThanBFS: boolean;
 }
 
+export interface ExecuteAlgorithmResult {
+  customResult: ExecuteAlgorithmResponse;
+  bfsResult: ExecuteAlgorithmResponse;
+  betterThanBFS: boolean;
+  metrics: SandboxMetrics;
+  mapHash: string;
+}
+
 export interface CustomAlgorithmState {
   algorithms: CustomAlgorithm[];
   expanded: boolean;
@@ -281,7 +340,15 @@ export interface CustomAlgorithmState {
   editorCode: string;
   editorName: string;
   isRunning: boolean;
-  compareResult: CompareAlgorithmResponse | null;
+  compareResult: ExecuteAlgorithmResult | null;
   showCustomPath: boolean;
   showBFSPath: boolean;
+  sandboxMetrics: SandboxMetrics;
+  currentMapHash: string;
+  versionCompareData: VersionCompareData[];
+  showVersionCompare: boolean;
+  expandedAlgorithmId: string | null;
+  comments: Record<string, AlgorithmComment[]>;
+  loadedVersion: number | null;
+  newCommentAlgorithms: Set<string>;
 }

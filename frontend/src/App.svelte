@@ -14,7 +14,7 @@ import CompetitionView from './components/CompetitionView.svelte';
 import PlaybackPanel from './components/PlaybackPanel.svelte';
 import CustomAlgorithmPanel from './components/CustomAlgorithmPanel.svelte';
 import { applyOperationToMap } from './drawingTools';
-import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment, CustomAlgorithm } from './types';
+import type { Operation, User, MapData, CursorUpdate, PathBookmark, RecordingState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment, CustomAlgorithm, AlgorithmComment } from './types';
 import { hasUniformCost, formatTime } from './utils';
 
   let showJoinModal = true;
@@ -59,9 +59,15 @@ import { hasUniformCost, formatTime } from './utils';
         if (data.recording) {
           recordingStore.updateRecording(data.recording);
         }
+        if (data.algorithms) {
+          customAlgorithmStore.setAlgorithms(data.algorithms);
+        }
+        if (data.algorithmComments) {
+          customAlgorithmStore.setComments(data.algorithmComments);
+        }
         customAlgorithmStore.setUserInfo(data.yourId, data.users[data.yourId]?.name || userName);
         customAlgorithmStore.setRoomId(roomId);
-        customAlgorithmStore.loadAlgorithms();
+        customAlgorithmStore.loadAlgorithms(true);
         connected = true;
         showJoinModal = false;
         isJoining = false;
@@ -137,6 +143,15 @@ import { hasUniformCost, formatTime } from './utils';
       },
       onAlgorithmDeleted: (data: { id: string }) => {
         customAlgorithmStore.deleteAlgorithm(data.id);
+      },
+      onAlgorithmCommentAdded: (comment: AlgorithmComment) => {
+        customAlgorithmStore.addComment(comment);
+        if (customAlgorithmStore.hasNewComments(comment.algorithmId)) {
+          uiStore.showToast(`${comment.userName} 对算法发表了新评论`, 3000);
+        }
+      },
+      onAlgorithmCommentDeleted: (data: { algorithmId: string; commentId: string }) => {
+        customAlgorithmStore.deleteComment(data.algorithmId, data.commentId);
       },
     });
   });

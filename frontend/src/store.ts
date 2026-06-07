@@ -24,8 +24,12 @@ import type {
   CompareBookmarkState,
   ComparePathInfo,
   CustomAlgorithm,
-  CompareAlgorithmResponse,
   CustomAlgorithmState,
+  AlgorithmVersion,
+  AlgorithmComment,
+  VersionCompareData,
+  SandboxMetrics,
+  ExecuteAlgorithmResult,
 } from './types';
 import { cellKey } from './utils';
 import { createEmptyMap } from './mapTemplates';
@@ -1068,6 +1072,18 @@ const initialCustomAlgorithmState: CustomAlgorithmState = {
   compareResult: null,
   showCustomPath: true,
   showBFSPath: true,
+  sandboxMetrics: {
+    memoryMB: 0,
+    timeMs: 0,
+    isFinished: true,
+  },
+  currentMapHash: '',
+  versionCompareData: [],
+  showVersionCompare: false,
+  expandedAlgorithmId: null,
+  comments: {},
+  loadedVersion: null,
+  newCommentAlgorithms: new Set(),
 };
 
 function createCustomAlgorithmStore() {
@@ -1076,6 +1092,10 @@ function createCustomAlgorithmStore() {
   let currentUserId: string | null = null;
   let currentUserName: string | null = null;
   let currentRoomId: string | null = null;
+
+  function calculateMapHash(mapData: MapData): string {
+    return btoa(JSON.stringify(mapData)).slice(0, 16);
+  }
 
   return {
     subscribe,
@@ -1111,11 +1131,17 @@ function createCustomAlgorithmStore() {
       }),
 
     deleteAlgorithm: (id: string) =>
-      update((state) => ({
-        ...state,
-        algorithms: state.algorithms.filter((a) => a.id !== id),
-        currentAlgorithm: state.currentAlgorithm?.id === id ? null : state.currentAlgorithm,
-      })),
+      update((state) => {
+        const comments = { ...state.comments };
+        delete comments[id];
+        return {
+          ...state,
+          algorithms: state.algorithms.filter((a) => a.id !== id),
+          currentAlgorithm: state.currentAlgorithm?.id === id ? null : state.currentAlgorithm,
+          expandedAlgorithmId: state.expandedAlgorithmId === id ? null : state.expandedAlgorithmId,
+          comments,
+        };
+      }),
 
     loadAlgorithm: (algorithm: CustomAlgorithm) =>
       update((state) => ({
@@ -1124,6 +1150,7 @@ function createCustomAlgorithmStore() {
         editorCode: algorithm.code,
         editorName: algorithm.name,
         compareResult: null,
+        loadedVersion: null,
       })),
 
     setEditorCode: (code: string) =>
@@ -1135,7 +1162,7 @@ function createCustomAlgorithmStore() {
     setIsRunning: (isRunning: boolean) =>
       update((state) => ({ ...state, isRunning })),
 
-    setCompareResult: (result: CompareAlgorithmResponse | null) =>
+    setCompareResult: (result: ExecuteAlgorithmResult | null) =>
       update((state) => ({ ...state, compareResult: result })),
 
     setShowCustomPath: (show: boolean) =>
@@ -1144,6 +1171,24 @@ function createCustomAlgorithmStore() {
     setShowBFSPath: (show: boolean) =>
       update((state) => ({ ...state, showBFSPath: show })),
 
+    setSandboxMetrics: (metrics: SandboxMetrics) =>
+      update((state) => ({ ...state, sandboxMetrics: metrics })),
+
+    setShowVersionCompare: (show: boolean) =>
+      update((state) => ({ ...state, showVersionCompare: show })),
+
+    setExpandedAlgorithmId: (id: string | null) =>
+      update((state) => ({ ...state, expandedAlgorithmId: id })),
+
+    setComments: (comments: Record<string, AlgorithmComment[]>) =>
+      update((state) => ({ ...state, comments })),
+
+    setLoadedVersion: (version: number | null) =>
+      update((state) => ({ ...state, loadedVersion: version })),
+
+    setVersionCompareData: (data: VersionCompareData[]) =>
+      update((state) => ({ ...state, versionCompareData: data })),
+
     newAlgorithm: () =>
       update((state) => ({
         ...state,
@@ -1151,7 +1196,110 @@ function createCustomAlgorithmStore() {
         editorCode: algorithmTemplate,
         editorName: '',
         compareResult: null,
+        loadedVersion: null,
       })),
+
+    addComment: (comment: AlgorithmComment) =>
+      update((state) => {
+        const comments = { ...state.comments };
+        const algoComments = [...(comments[comment.algorithmId] || [])];
+        algoComments.unshift(comment);
+        if (algoComments.length > 20) {
+          algoComments.splice(20);
+        }
+        comments[comment.algorithmId] = algoComments;
+
+        const newCommentAlgorithms = new Set(state.newCommentAlgorithms);
+        if (state.expandedAlgorithmId !== comment.algorithmId) {
+          newCommentAlgorithms.add(comment.algorithmId);
+        }
+
+        return { ...state, comments, newCommentAlgorithms };
+      }),
+
+    deleteComment: (algorithmId: string, commentId: string) =>
+      update((state) => {
+        const comments = { ...state.comments };
+        const algoComments = (comments[algorithmId] || []).filter((c) => c.id !== commentId);
+        comments[algorithmId] = algoComments;
+        return { ...state, comments };
+      }),
+
+    markCommentsAsRead: (algorithmId: string) =>
+      update((state) => {
+        const newCommentAlgorithms = new Set(state.newCommentAlgorithms);
+        newCommentAlgorithms.delete(algorithmId);
+        return { ...state, newCommentAlgorithms };
+      }),
+
+    hasNewComments: (algorithmId: string): boolean => {
+      const state = get(customAlgorithmStore);
+      return state.newCommentAlgorithms.has(algorithmId);
+    },
+
+    async loadAlgorithmVersion(algorithmId: string, version: number): Promise<AlgorithmVersion | null> {
+      if (!currentRoomId) return null;
+      try {
+        const response = await fetch(`/api/room/${currentRoomId}/algorithms/${algorithmId}/versions/${version}`);
+        const data = await response.json();
+        if (response.ok && data.version) {
+          return data.version;
+        }
+      } catch (e) {
+        console.error('加载算法版本失败:', e);
+      }
+      return null;
+    },
+
+    async loadVersion(algorithmId: string, version: number) {
+      const versionData = await this.loadAlgorithmVersion(algorithmId, version);
+      if (versionData) {
+        const algo = get(customAlgorithmStore).algorithms.find((a) => a.id === algorithmId);
+        if (algo) {
+          update((state) => ({
+            ...state,
+            currentAlgorithm: algo,
+            editorCode: versionData.code,
+            editorName: algo.name,
+            compareResult: null,
+            loadedVersion: version,
+          }));
+        }
+      }
+    },
+
+    async loadVersionCompareData(algorithmId: string, mapHash: string) {
+      if (!currentRoomId) return;
+      try {
+        const response = await fetch(`/api/room/${currentRoomId}/algorithms/${algorithmId}/compare?mapHash=${mapHash}`);
+        const data = await response.json();
+        if (response.ok) {
+          update((state) => ({
+            ...state,
+            versionCompareData: data.compareData || [],
+          }));
+        }
+      } catch (e) {
+        console.error('加载版本对比数据失败:', e);
+      }
+    },
+
+    async loadAlgorithmComments(algorithmId: string) {
+      if (!currentRoomId) return;
+      try {
+        const response = await fetch(`/api/room/${currentRoomId}/algorithms/${algorithmId}/comments`);
+        const data = await response.json();
+        if (response.ok) {
+          update((state) => {
+            const comments = { ...state.comments };
+            comments[algorithmId] = data.comments || [];
+            return { ...state, comments };
+          });
+        }
+      } catch (e) {
+        console.error('加载算法评论失败:', e);
+      }
+    },
 
     async saveAlgorithm() {
       const state = get(customAlgorithmStore);
@@ -1190,10 +1338,11 @@ function createCustomAlgorithmStore() {
           throw new Error(data.error || '保存失败');
         }
 
-        uiStore.showToast('保存成功');
+        uiStore.showToast(`保存成功，版本 v${data.algorithm.currentVersion}`);
         update((s) => ({
           ...s,
           currentAlgorithm: data.algorithm,
+          loadedVersion: null,
         }));
       } catch (e) {
         uiStore.showToast('保存失败: ' + (e as Error).message);
@@ -1240,10 +1389,41 @@ function createCustomAlgorithmStore() {
         return;
       }
 
-      update((s) => ({ ...s, isRunning: true }));
+      update((s) => ({
+        ...s,
+        isRunning: true,
+        sandboxMetrics: { memoryMB: 0, timeMs: 0, isFinished: false },
+      }));
+
+      let metricsInterval: number | null = null;
+      metricsInterval = window.setInterval(() => {
+        const currentState = get(customAlgorithmStore);
+        if (!currentState.isRunning) {
+          if (metricsInterval) clearInterval(metricsInterval);
+          return;
+        }
+        const elapsed = currentState.sandboxMetrics.timeMs + 50;
+        const memoryEstimate = Math.min(30, elapsed / 100);
+        update((s) => ({
+          ...s,
+          sandboxMetrics: {
+            memoryMB: memoryEstimate,
+            timeMs: elapsed,
+            isFinished: false,
+          },
+        }));
+      }, 50);
 
       try {
-        const response = await fetch('/api/algorithm/execute', {
+        const mapHash = calculateMapHash(mapState.mapData);
+        const params = new URLSearchParams();
+        if (state.currentAlgorithm?.id && currentRoomId) {
+          params.set('algorithmId', state.currentAlgorithm.id);
+          params.set('version', String(state.currentAlgorithm.currentVersion));
+          params.set('roomId', currentRoomId);
+        }
+
+        const response = await fetch(`/api/algorithm/execute?${params.toString()}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1261,10 +1441,14 @@ function createCustomAlgorithmStore() {
           throw new Error(data.error || '执行失败');
         }
 
+        if (metricsInterval) clearInterval(metricsInterval);
+
         update((s) => ({
           ...s,
           isRunning: false,
           compareResult: data,
+          sandboxMetrics: data.metrics || { memoryMB: 0, timeMs: 0, isFinished: true },
+          currentMapHash: data.mapHash || mapHash,
           showCustomPath: true,
           showBFSPath: true,
         }));
@@ -1273,15 +1457,23 @@ function createCustomAlgorithmStore() {
           uiStore.showToast('🎉 恭喜！您的算法优于BFS基线！', 3000);
         }
       } catch (e) {
-        update((s) => ({ ...s, isRunning: false }));
+        if (metricsInterval) clearInterval(metricsInterval);
+        update((s) => ({
+          ...s,
+          isRunning: false,
+          sandboxMetrics: { ...s.sandboxMetrics, isFinished: true },
+        }));
         uiStore.showToast('执行失败: ' + (e as Error).message);
       }
     },
 
-    async loadAlgorithms() {
+    async loadAlgorithms(includeVersions: boolean = true) {
       if (!currentRoomId) return;
       try {
-        const response = await fetch(`/api/room/${currentRoomId}/algorithms`);
+        const url = includeVersions
+          ? `/api/room/${currentRoomId}/algorithms?includeVersions=true`
+          : `/api/room/${currentRoomId}/algorithms`;
+        const response = await fetch(url);
         const data = await response.json();
         if (response.ok) {
           update((state) => ({ ...state, algorithms: data.algorithms || [] }));

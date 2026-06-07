@@ -1178,7 +1178,11 @@ export class DStarLitePlanner {
     stepDelay: number = 0
   ): Promise<AlgorithmResult> {
     if (!this.state) {
-      return this.plan(start, end, onStep, stepDelay);
+      const adaptedOnStep = onStep 
+        ? (visited: Set<string>, openSet: Set<string>, current: Cell | null) => 
+            onStep(visited, openSet, current, new Set<string>())
+        : undefined;
+      return this.plan(start, end, adaptedOnStep, stepDelay);
     }
 
     const startTime = performance.now();

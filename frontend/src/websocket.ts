@@ -1,9 +1,9 @@
-import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment, CustomAlgorithm } from './types';
+import type { Message, Operation, CursorUpdate, User, MapData, PathBookmark, RecordingState, PlaybackState, RecordedOperation, MapSnapshot, PlaybackBookmark, BookmarkComment, CustomAlgorithm, AlgorithmComment } from './types';
 
 interface WebSocketCallbacks {
   onConnect?: () => void;
   onDisconnect?: () => void;
-  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[]; bookmarkComments: Record<string, BookmarkComment[]>; recording: RecordingState; playbacks: Record<string, PlaybackState> }) => void;
+  onUserJoin?: (data: { user: User; users: Record<string, User>; mapData: MapData; yourId: string; bookmarks: PathBookmark[]; bookmarkComments: Record<string, BookmarkComment[]>; recording: RecordingState; playbacks: Record<string, PlaybackState>; algorithms: CustomAlgorithm[]; algorithmComments: Record<string, AlgorithmComment[]> }) => void;
   onUserLeave?: (data: { userId: string; users: Record<string, User> }) => void;
   onCursor?: (cursor: CursorUpdate) => void;
   onOperation?: (op: Operation) => void;
@@ -26,6 +26,8 @@ interface WebSocketCallbacks {
   onPlaybackBookmarks?: (data: { bookmarks: PlaybackBookmark[] }) => void;
   onAlgorithmUpdated?: (algorithm: CustomAlgorithm) => void;
   onAlgorithmDeleted?: (data: { id: string }) => void;
+  onAlgorithmCommentAdded?: (comment: AlgorithmComment) => void;
+  onAlgorithmCommentDeleted?: (data: { algorithmId: string; commentId: string }) => void;
 }
 
 export class WebSocketClient {
@@ -176,6 +178,12 @@ export class WebSocketClient {
         break;
       case 'algorithm-deleted':
         this.callbacks.onAlgorithmDeleted?.(message.payload);
+        break;
+      case 'algorithm-comment-added':
+        this.callbacks.onAlgorithmCommentAdded?.(message.payload);
+        break;
+      case 'algorithm-comment-deleted':
+        this.callbacks.onAlgorithmCommentDeleted?.(message.payload);
         break;
     }
   }
@@ -416,6 +424,32 @@ export class WebSocketClient {
       this.ws.send(JSON.stringify(message));
     } catch (e) {
       console.error('Failed to request playback bookmarks:', e);
+    }
+  }
+
+  addAlgorithmComment(algorithmId: string, content: string) {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'algorithm-comment-add',
+      payload: { algorithmId, content },
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to add algorithm comment:', e);
+    }
+  }
+
+  deleteAlgorithmComment(algorithmId: string, commentId: string) {
+    if (!this.isConnected || !this.ws) return;
+    const message = {
+      type: 'algorithm-comment-delete',
+      payload: { algorithmId, commentId },
+    };
+    try {
+      this.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.error('Failed to delete algorithm comment:', e);
     }
   }
 }

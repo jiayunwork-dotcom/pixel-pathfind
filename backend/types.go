@@ -152,14 +152,65 @@ type PlaybackState struct {
 	IsActive bool   `json:"isActive"`
 }
 
+type AlgorithmVersion struct {
+	ID         string `json:"id"`
+	AlgorithmID string `json:"algorithmId"`
+	Version    int    `json:"version"`
+	Code       string `json:"code"`
+	CreatedAt  int64  `json:"createdAt"`
+}
+
+type AlgorithmVersionInfo struct {
+	Version   int   `json:"version"`
+	CreatedAt int64 `json:"createdAt"`
+}
+
 type CustomAlgorithm struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Code       string    `json:"code"`
-	AuthorID   string    `json:"authorId"`
-	AuthorName string    `json:"authorName"`
-	CreatedAt  int64     `json:"createdAt"`
-	UpdatedAt  int64     `json:"updatedAt"`
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	Code            string                 `json:"code"`
+	AuthorID        string                 `json:"authorId"`
+	AuthorName      string                 `json:"authorName"`
+	CreatedAt       int64                  `json:"createdAt"`
+	UpdatedAt       int64                  `json:"updatedAt"`
+	CurrentVersion  int                    `json:"currentVersion"`
+	VersionCount    int                    `json:"versionCount"`
+	Versions        []AlgorithmVersionInfo `json:"versions,omitempty"`
+}
+
+type AlgorithmComment struct {
+	ID          string `json:"id"`
+	AlgorithmID string `json:"algorithmId"`
+	UserID      string `json:"userId"`
+	UserName    string `json:"userName"`
+	Content     string `json:"content"`
+	CreatedAt   int64  `json:"createdAt"`
+}
+
+type AlgorithmExecutionCache struct {
+	AlgorithmID string    `json:"algorithmId"`
+	Version     int       `json:"version"`
+	MapHash     string    `json:"mapHash"`
+	Path        []Cell    `json:"path"`
+	PathLength  int       `json:"pathLength"`
+	TotalCost   float64   `json:"totalCost"`
+	TimeMs      int64     `json:"timeMs"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   int64     `json:"createdAt"`
+}
+
+type VersionCompareData struct {
+	Version    int     `json:"version"`
+	PathLength int     `json:"pathLength"`
+	TotalCost  float64 `json:"totalCost"`
+	TimeMs     int64   `json:"timeMs"`
+	HasResult  bool    `json:"hasResult"`
+}
+
+type SandboxMetrics struct {
+	MemoryMB   float64 `json:"memoryMB"`
+	TimeMs     int64   `json:"timeMs"`
+	IsFinished bool    `json:"isFinished"`
 }
 
 type ExecuteAlgorithmRequest struct {
