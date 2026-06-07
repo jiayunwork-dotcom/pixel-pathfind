@@ -145,6 +145,11 @@ func (rm *RoomManager) JoinRoom(roomID, userName string, conn *websocket.Conn) (
 		},
 	}
 
+	joinData, err := json.Marshal(joinMsg)
+	if err == nil {
+		conn.WriteMessage(websocket.TextMessage, joinData)
+	}
+
 	room.broadcast(joinMsg, userID)
 
 	return user, nil
